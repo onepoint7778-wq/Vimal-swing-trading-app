@@ -12,27 +12,41 @@ except ImportError:
 
 st.set_page_config(page_title="AI Swing Trading Dashboard", page_icon="📈", layout="wide", initial_sidebar_state="collapsed")
 
-# Inject Custom CSS for Premium Look & Boxes
+# --- PREMIUM BLUE & WHITE THEME ---
 st.markdown("""
     <style>
-        .stApp { background-color: #F4F6F9; color: #1E1E1E; }
+        /* Deep Navy Blue Background */
+        .stApp { background-color: #0A192F; color: #CCD6F6; }
         .st-emotion-cache-1y4p8pa { padding-top: 2rem; }
-        h1 { color: #0D47A1 !important; font-weight: 800; }
-        h2, h3 { color: #1565C0 !important; }
-        /* Add shadows to containers to make them look like real boxes */
+        
+        /* Headers */
+        h1, h2, h3 { color: #64FFDA !important; font-weight: 700; }
+        h4, h5 { color: #E6F1FF !important; font-weight: 600; }
+        
+        /* Glassmorphism White Boxes */
         [data-testid="stVerticalBlockBorderWrapper"] {
             border-radius: 12px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.08);
-            background-color: #FFFFFF;
-            padding: 10px;
-            border: 1px solid #E0E0E0;
+            background-color: rgba(255, 255, 255, 0.03);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 15px;
         }
+        
+        /* Dataframes & Inputs inside boxes */
+        .stDataFrame { background-color: #112240; border-radius: 8px; }
+        .stChatFloatingInputContainer { background-color: #112240 !important; }
+        
+        /* Custom Info Text */
+        .ai-log { color: #8892B0; font-family: monospace; font-size: 14px; margin-bottom: 5px; }
+        .ai-log strong { color: #64FFDA; }
+        .ai-reject { color: #FF6B6B; font-family: monospace; font-size: 13px; }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("📈 Premium AI Swing Trading System")
+st.title("📈 AI Trading Floor (The Operations Room)")
 
-# --- INITIALIZE JOURNAL TO CALCULATE DYNAMIC CAPITAL ---
+# --- INITIALIZE JOURNAL ---
 if "journal" not in st.session_state:
     st.session_state.journal = pd.DataFrame(columns=["Date", "Stock", "Entry", "Quantity", "Status", "P&L"])
 
@@ -47,50 +61,77 @@ initial_capital = 50000
 total_pnl = pd.to_numeric(df_journal['P&L'], errors='coerce').sum() if not df_journal.empty else 0
 current_capital = initial_capital + total_pnl
 
-st.info(f"💰 **Total Capital:** ₹{current_capital:,.2f} | 🛡️ **Max Trades:** 3 | 🎯 **Capital Per Trade:** ₹{current_capital/3:,.2f}")
+st.markdown(f"**💰 Total Capital:** ₹{current_capital:,.2f} &nbsp;&nbsp;|&nbsp;&nbsp; **🛡️ Max Active Trades:** 3 &nbsp;&nbsp;|&nbsp;&nbsp; **🎯 Capital Per Trade:** ₹{current_capital/3:,.2f}")
+st.divider()
 
 @st.cache_data(ttl=3600)
 def fetch_data(capital):
     agents = SwingTradingAgents(current_capital=capital)
     stocks_df = agents.run_pipeline()
-    return agents.sector_rrg, stocks_df, agents.risk_per_trade
+    # Now returns: sector_rrg, df_results, risk_per_trade, logs
+    return stocks_df
 
-with st.spinner(f"🚀 AI is calculating Position Sizes based on your ₹{current_capital:,.2f} capital..."):
-    sector_rrg, stocks_df, dynamic_risk = fetch_data(current_capital)
+with st.spinner(f"🚀 Your AI Staff is currently analyzing the market..."):
+    sector_rrg, stocks_df, dynamic_risk, logs = fetch_data(current_capital)
 
-# --- SPLIT LAYOUT (LIKE THE MOCKUP) ---
+# --- AI OPERATIONS ROOM (TOP SECTION) ---
+st.subheader("👨‍💻 Live Operations Room")
+col_op1, col_op2, col_op3 = st.columns(3)
+
+with col_op1:
+    with st.container(border=True):
+        st.markdown("#### 🕵️‍♂️ Rahul (Data Miner)")
+        st.markdown(f"<div class='ai-log'><strong>Status:</strong> {logs['scraper']}</div>", unsafe_allow_html=True)
+
+with col_op2:
+    with st.container(border=True):
+        st.markdown("#### 📊 Amit (Sector Analyst)")
+        st.markdown(f"<div class='ai-log'><strong>Status:</strong> {logs['analyst']}</div>", unsafe_allow_html=True)
+
+with col_op3:
+    with st.container(border=True):
+        st.markdown("#### 🛡️ Vikram (Risk Manager)")
+        rejection_count = len(logs['risk'])
+        st.markdown(f"<div class='ai-log'><strong>Status:</strong> Screened all stocks. {rejection_count} stocks rejected to protect capital.</div>", unsafe_allow_html=True)
+        if rejection_count > 0:
+            with st.expander("View Rejection Report"):
+                for rej in logs['risk']:
+                    st.markdown(f"<div class='ai-reject'>🚫 <b>{rej['Stock']}</b>: {rej['Reason']}</div>", unsafe_allow_html=True)
+
+st.divider()
+
+# --- MAIN DASHBOARD ---
 col_left, col_right = st.columns([1.2, 1], gap="large")
 
 with col_left:
     with st.container(border=True):
-        st.subheader("🎯 The Final Decision (Strictly Top 2)")
-        st.markdown(f"*Risk per trade automatically adjusted to **₹{dynamic_risk:,.2f}***")
+        st.subheader("🧑‍💼 Vimal (The CEO)")
+        st.markdown(f"<div class='ai-log'>Based on Vikram's risk parameters, here are the safest Top Picks for deployment. Risk per trade is locked at <b>₹{dynamic_risk:,.2f}</b>.</div>", unsafe_allow_html=True)
         
         if stocks_df is not None and not stocks_df.empty:
             st.dataframe(stocks_df, use_container_width=True, hide_index=True)
-            st.success(f"✅ Here are your Top {len(stocks_df)} safest setups.")
+            st.success(f"✅ Setup Approved. Proceed with execution.")
         else:
-            st.warning("⚠️ Market is too stretched. No stocks passed the strict filters today.")
+            st.warning("⚠️ CEO's Verdict: Market conditions are too hostile today. Keep capital in cash. No execution.")
             
     with st.container(border=True):
-        st.subheader("🌐 Sector Relative Rotation Graph (RRG)")
+        st.subheader("🌐 Sector Map (RRG)")
         if sector_rrg:
             rrg_data = [{'Sector': sec, 'RS-Ratio': data['Ratio'], 'RS-Momentum': data['Momentum'], 'Quadrant': data['Quadrant']} for sec, data in sector_rrg.items()]
             df_rrg = pd.DataFrame(rrg_data)
-            color_map = {'Leading': 'green', 'Improving': 'blue', 'Weakening': 'orange', 'Lagging': 'red'}
+            color_map = {'Leading': '#64FFDA', 'Improving': '#2196F3', 'Weakening': '#FFC107', 'Lagging': '#FF5252'}
             fig = px.scatter(df_rrg, x="RS-Ratio", y="RS-Momentum", text="Sector", color="Quadrant", color_discrete_map=color_map, size_max=60)
             fig.add_hline(y=100, line_dash="dash", line_color="gray")
             fig.add_vline(x=100, line_dash="dash", line_color="gray")
             fig.update_traces(textposition='top center', marker=dict(size=12))
-            fig.update_layout(plot_bgcolor='rgba(255,255,255,1)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color='#1E1E1E'), height=350, margin=dict(l=20, r=20, t=30, b=20))
+            fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color='#CCD6F6'), height=350, margin=dict(l=20, r=20, t=30, b=20))
             st.plotly_chart(fig, use_container_width=True)
 
 with col_right:
     with st.container(border=True):
-        st.subheader("🤖 Chat Journal Agent")
-        st.caption("Tell me your trades! E.g., 'Bought TCS at 3500' or 'TCS target hit'.")
+        st.subheader("🤖 Neha (Journal Clerk)")
+        st.caption("E.g., 'Bought TCS at 3500' or 'TCS target hit'.")
         
-        # Chat history container with fixed height
         chat_container = st.container(height=300)
         
         if "chat_history" not in st.session_state:
@@ -100,7 +141,7 @@ with col_right:
             with chat_container.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
-        if user_input := st.chat_input("Type here..."):
+        if user_input := st.chat_input("Type your order here..."):
             st.session_state.chat_history.append({"role": "user", "content": user_input})
             with chat_container.chat_message("user"):
                 st.markdown(user_input)
@@ -139,7 +180,7 @@ with col_right:
                 st.rerun()
 
     with st.container(border=True):
-        st.subheader("📊 Live Journal Data")
+        st.subheader("📊 The Vault (Live Journal Data)")
         edited_df = st.data_editor(
             df_journal, num_rows="dynamic",
             column_config={"Status": st.column_config.SelectboxColumn(options=["Open", "Won", "Lost"])},

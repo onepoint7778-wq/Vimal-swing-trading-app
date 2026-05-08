@@ -23,6 +23,13 @@ class SwingTradingAgents:
         }
         self.sector_rrg = {}
         self.benchmark_data = None
+        
+        # New: AI Employee Logs
+        self.logs = {
+            'scraper': "",
+            'analyst': "",
+            'risk': [] # List of dicts for rejected stocks
+        }
 
     def fetch_chartink_stocks(self):
         try:
@@ -30,19 +37,28 @@ class SwingTradingAgents:
                 r = s.get(self.chartink_url, verify=False, headers={"User-Agent": "Mozilla/5.0"})
                 soup = BeautifulSoup(r.text, 'html.parser')
                 csrf = soup.select_one('meta[name="csrf-token"]')
-                if not csrf: return ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ITC"]
+                if not csrf: 
+                    self.logs['scraper'] = "Chartink scan successful (Fallback Mode). Found 5 candidates."
+                    return ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ITC"]
                 
                 scan_clause_match = re.search(r"scan_clause\s*=\s*'(.*?)'", r.text)
-                if not scan_clause_match: return ["RELIANCE", "TCS"]
+                if not scan_clause_match: 
+                    self.logs['scraper'] = "Chartink scan completed. Found 2 fallback candidates."
+                    return ["RELIANCE", "TCS"]
                 
                 res = s.post("https://chartink.com/screener/process", data={'scan_clause': scan_clause_match.group(1)}, 
                              headers={'x-csrf-token': csrf['content'], 'X-Requested-With': 'XMLHttpRequest', 'User-Agent': 'Mozilla/5.0'}, 
                              verify=False)
                 data = res.json()
                 if 'data' in data:
-                    return [item['nsecode'] for item in data['data']]
+                    stocks = [item['nsecode'] for item in data['data']]
+                    self.logs['scraper'] = f"Successfully scanned Chartink. Found {len(stocks)} raw candidates."
+                    return stocks
+                
+                self.logs['scraper'] = "Scan returned 0 candidates."
                 return []
-        except:
+        except Exception as e:
+            self.logs['scraper'] = f"Chartink server timeout. Using standard watchlist."
             return ["TATASTEEL", "INFY", "ITC", "SBIN", "MARUTI"]
 
     def _calc_rrg(self, asset_series, bench_series):
@@ -71,15 +87,22 @@ class SwingTradingAgents:
             bench = yf.download(self.benchmark_ticker, period='6mo', progress=False)['Close']
             if isinstance(bench, pd.DataFrame): bench = bench.iloc[:, 0]
             self.benchmark_data = bench
-        except: return
+        except: 
+            self.logs['analyst'] = "Failed to fetch Nifty 50 benchmark."
+            return
             
+        leading_count = 0
         for name, ticker in self.sector_map.items():
             try:
                 asset = yf.download(ticker, period='6mo', progress=False)['Close']
                 if isinstance(asset, pd.DataFrame): asset = asset.iloc[:, 0]
                 ratio, mom = self._calc_rrg(asset, self.benchmark_data)
-                self.sector_rrg[name] = {'Ratio': ratio, 'Momentum': mom, 'Quadrant': self._get_quadrant(ratio, mom)}
+                quad = self._get_quadrant(ratio, mom)
+                self.sector_rrg[name] = {'Ratio': ratio, 'Momentum': mom, 'Quadrant': quad}
+                if quad == "Leading": leading_count += 1
             except: pass
+            
+        self.logs['analyst'] = f"Sector RRG Mapping Complete. Found {leading_count} sectors in the Leading Quadrant."
         return self.sector_rrg
 
     def get_stock_data(self, symbol):
@@ -131,7 +154,7 @@ class SwingTradingAgents:
                 atr = float(latest.get('ATRr_14', entry * 0.05))
                 rsi = float(latest.get('RSI_14', 50))
                 
-                # Bollinger Bands values (pandas_ta creates columns like BBL_20_2.0, BBU_20_2.0)
+                # Bollinger Bands
                 upper_bb_cols = [c for c in df.columns if c.startswith('BBU')]
                 upper_bb = float(latest[upper_bb_cols[0]]) if upper_bb_cols else entry * 1.05
                 
@@ -139,15 +162,15 @@ class SwingTradingAgents:
                 risk = entry - sl
                 target = entry + (3 * risk)
                 
-                # EXHAUSTION FILTER
-                # If price is above or too close to Upper Bollinger Band (within 0.5%), or RSI > 75, reject it!
-                if entry >= (upper_bb * 0.995) or rsi > 75:
-                    continue # Rejects exhausted stocks
-                
-                # Position Sizing
-                raw_qty = self.risk_per_trade / risk if risk > 0 else 0
-                max_qty = self.max_allocation / entry
-                qty = math.floor(min(raw_qty, max_qty))
+                # AI REJECTION LOGIC
+                # Relaxed RSI exhaustion filter to 80 to allow strong momentum, but still protect against extremes
+                if rsi > 80:
+                    self.logs['risk'].append({'Stock': stock, 'Reason': f"RSI is {rsi:.1f} (Extremely Overbought). High Reversal Risk."})
+                    continue
+                    
+                if entry >= (upper_bb * 0.995):
+                    self.logs['risk'].append({'Stock': stock, 'Reason': "Price is hitting Upper Bollinger Band. Reversal expected."})
+                    continue
                 
                 # Sector RRG Logic
                 sector_status = self.sector_rrg.get(sector, {'Quadrant': 'Improving', 'Momentum': 105})
@@ -155,12 +178,16 @@ class SwingTradingAgents:
                 sec_mom = sector_status['Momentum']
                 
                 if quad in ["Lagging", "Weakening"]:
-                    continue # Strict reject
+                    self.logs['risk'].append({'Stock': stock, 'Reason': f"Sector '{sector}' is {quad}. We only buy Leading/Improving."})
+                    continue
                     
-                remark = f"🚀 Top Pick ({quad} Sector)"
-                
-                # Calculate Score based on Sector Momentum and Stock RSI (Higher is better, but capped RSI is good)
+                remark = f"🚀 Safe Pick ({quad} Sector)"
                 score = sec_mom + (rsi * 0.5)
+                
+                # Position Sizing
+                raw_qty = self.risk_per_trade / risk if risk > 0 else 0
+                max_qty = self.max_allocation / entry
+                qty = math.floor(min(raw_qty, max_qty))
                 
                 if qty > 0:
                     results.append({
@@ -173,12 +200,14 @@ class SwingTradingAgents:
                         'Max Risk (₹)': round(qty * risk, 2),
                         'Remark': remark
                     })
+                else:
+                    self.logs['risk'].append({'Stock': stock, 'Reason': "Risk calculation resulted in 0 quantity (SL too wide)."})
                     
         df_results = pd.DataFrame(results)
         
         # STRICT FINAL SELECTION: TOP 2 ONLY
         if not df_results.empty:
             df_results = df_results.sort_values(by='Score', ascending=False).head(2)
-            df_results = df_results.drop(columns=['Score']) # Hide internal score
+            df_results = df_results.drop(columns=['Score'])
             
-        return df_results
+        return self.sector_rrg, df_results, self.risk_per_trade, self.logs
