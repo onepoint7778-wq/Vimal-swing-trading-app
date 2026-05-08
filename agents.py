@@ -1,6 +1,5 @@
 import yfinance as yf
 import pandas as pd
-import pandas_ta as ta
 import requests
 from bs4 import BeautifulSoup
 import re
@@ -96,9 +95,24 @@ class SwingTradingAgents:
                     sector = key
                     break
             
-            df.ta.rsi(length=14, append=True)
-            df.ta.atr(length=14, append=True)
-            df.ta.bbands(length=20, std=2, append=True) # Bollinger Bands for Exhaustion
+            # Manual RSI (14)
+            delta = df['Close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            df['RSI_14'] = 100 - (100 / (1 + rs))
+            
+            # Manual ATR (14)
+            tr1 = df['High'] - df['Low']
+            tr2 = abs(df['High'] - df['Close'].shift())
+            tr3 = abs(df['Low'] - df['Close'].shift())
+            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            df['ATRr_14'] = tr.rolling(window=14).mean()
+            
+            # Manual Bollinger Bands (20, 2)
+            sma = df['Close'].rolling(window=20).mean()
+            std = df['Close'].rolling(window=20).std()
+            df['BBU_20_2.0'] = sma + (2 * std)
             
             return df, sector
         except:
