@@ -215,7 +215,7 @@ class SwingTradingAgents:
     def run_backtest(self, start_date="2026-01-01", end_date="2026-04-30"):
         # Simulated AI Backtester to avoid Yahoo Finance API rate limits on cloud
         import random
-        from datetime import timedelta
+        from datetime import datetime, timedelta
         
         start = datetime.strptime(start_date, "%Y-%m-%d")
         end = datetime.strptime(end_date, "%Y-%m-%d")

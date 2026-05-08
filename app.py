@@ -145,8 +145,8 @@ with tab1:
                 
                 fig.update_traces(textposition='top center', marker=dict(size=10, color='#0A2540'))
                 
-                fig.update_xaxes(range=[95, 105], showgrid=False, title="JdK RS-Ratio")
-                fig.update_yaxes(range=[95, 105], showgrid=False, title="JdK RS-Momentum")
+                fig.update_xaxes(showgrid=False, title="JdK RS-Ratio")
+                fig.update_yaxes(showgrid=False, title="JdK RS-Momentum")
                 
                 fig.update_layout(plot_bgcolor='#FFFFFF', paper_bgcolor='#FFFFFF', font=dict(color='#333333'), height=400, margin=dict(l=20, r=20, t=30, b=20))
                 st.plotly_chart(fig, use_container_width=True)
