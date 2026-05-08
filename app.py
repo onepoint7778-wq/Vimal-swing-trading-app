@@ -161,7 +161,7 @@ with tab1:
                     fig.add_trace(go.Scatter(
                         x=moms, y=ratios, mode='lines', 
                         showlegend=False,
-                        line=dict(color=color, width=4, shape='spline'),
+                        line=dict(color=color, width=5),
                         opacity=0.3,
                         hoverinfo='skip'
                     ))

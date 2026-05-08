@@ -72,14 +72,11 @@ class SwingTradingAgents:
         rs_std = rs.rolling(window=14).std()
         rs_ratio = 100 + ((rs - rs_mean) / rs_std) * 5
         
-        ratio_mean = rs_ratio.rolling(window=14).mean()
-        ratio_std = rs_ratio.rolling(window=14).std()
-        rs_mom = 100 + ((rs_ratio - ratio_mean) / ratio_std) * 5
-        # Get the last 5 points, spaced by 5 days (1 week intervals)
-        rs_ratio_weekly = rs_ratio.iloc[::-5].head(5)[::-1]
-        rs_mom_weekly = rs_mom.iloc[::-5].head(5)[::-1]
+        # Get exactly 2 points (4 weeks ago and today) to draw a straight trajectory tail
+        ratio_history = [rs_ratio.iloc[-20], rs_ratio.iloc[-1]]
+        mom_history = [rs_mom.iloc[-20], rs_mom.iloc[-1]]
         
-        return rs_ratio_weekly.tolist(), rs_mom_weekly.tolist()
+        return ratio_history, mom_history
 
     def _get_quadrant(self, ratio, momentum):
         if ratio > 100 and momentum > 100: return "Leading"
@@ -103,7 +100,7 @@ class SwingTradingAgents:
                 if isinstance(asset, pd.DataFrame): asset = asset.iloc[:, 0]
                 ratios, moms = self._calc_rrg(asset, self.benchmark_data)
                 
-                if len(ratios) == 5:
+                if len(ratios) == 2:
                     quad = self._get_quadrant(ratios[-1], moms[-1])
                     self.sector_rrg[name] = {'Ratios': ratios, 'Momentums': moms, 'Quadrant': quad}
                     if quad == "Leading": leading_count += 1
