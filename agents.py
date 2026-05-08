@@ -73,8 +73,11 @@ class SwingTradingAgents:
         ratio_mean = rs_ratio.rolling(window=14).mean()
         ratio_std = rs_ratio.rolling(window=14).std()
         rs_mom = 100 + ((rs_ratio - ratio_mean) / ratio_std) * 5
+        # Get the last 5 points, spaced by 5 days (1 week intervals)
+        rs_ratio_weekly = rs_ratio.iloc[::-5].head(5)[::-1]
+        rs_mom_weekly = rs_mom.iloc[::-5].head(5)[::-1]
         
-        return rs_ratio.iloc[-1], rs_mom.iloc[-1]
+        return rs_ratio_weekly.tolist(), rs_mom_weekly.tolist()
 
     def _get_quadrant(self, ratio, momentum):
         if ratio > 100 and momentum > 100: return "Leading"
@@ -96,10 +99,12 @@ class SwingTradingAgents:
             try:
                 asset = yf.download(ticker, period='6mo', progress=False)['Close']
                 if isinstance(asset, pd.DataFrame): asset = asset.iloc[:, 0]
-                ratio, mom = self._calc_rrg(asset, self.benchmark_data)
-                quad = self._get_quadrant(ratio, mom)
-                self.sector_rrg[name] = {'Ratio': ratio, 'Momentum': mom, 'Quadrant': quad}
-                if quad == "Leading": leading_count += 1
+                ratios, moms = self._calc_rrg(asset, self.benchmark_data)
+                
+                if len(ratios) == 5:
+                    quad = self._get_quadrant(ratios[-1], moms[-1])
+                    self.sector_rrg[name] = {'Ratios': ratios, 'Momentums': moms, 'Quadrant': quad}
+                    if quad == "Leading": leading_count += 1
             except: pass
             
         self.logs['analyst'] = f"Sector RRG Mapping Complete. Found {leading_count} sectors in the Leading Quadrant."
@@ -173,9 +178,9 @@ class SwingTradingAgents:
                     continue
                 
                 # Sector RRG Logic
-                sector_status = self.sector_rrg.get(sector, {'Quadrant': 'Improving', 'Momentum': 105})
+                sector_status = self.sector_rrg.get(sector, {'Quadrant': 'Improving', 'Momentums': [105]})
                 quad = sector_status['Quadrant']
-                sec_mom = sector_status['Momentum']
+                sec_mom = sector_status['Momentums'][-1]
                 
                 if quad in ["Lagging", "Weakening"]:
                     self.logs['risk'].append({'Stock': stock, 'Reason': f"Sector '{sector}' is {quad}. We only buy Leading/Improving."})

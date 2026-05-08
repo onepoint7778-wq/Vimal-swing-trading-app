@@ -121,11 +121,7 @@ with tab1:
         with st.container(border=True):
             st.subheader("🌐 Relative Rotation Graph (RRG)")
             if sector_rrg:
-                rrg_data = [{'Sector': sec, 'RS-Ratio': data['Ratio'], 'RS-Momentum': data['Momentum'], 'Quadrant': data['Quadrant']} for sec, data in sector_rrg.items()]
-                df_rrg = pd.DataFrame(rrg_data)
-                
-                # Sharpely Style RRG Plotly
-                fig = px.scatter(df_rrg, x="RS-Ratio", y="RS-Momentum", text="Sector", size_max=60)
+                fig = go.Figure()
                 
                 # Add colored quadrants (Sharpely Style)
                 fig.add_vrect(x0=0, x1=100, fillcolor="#FFEBEE", layer="below", line_width=0, opacity=0.8) # Bottom-Left (Lagging, Red)
@@ -143,7 +139,28 @@ with tab1:
                 fig.add_hline(y=100, line_width=1, line_color="#999999")
                 fig.add_vline(x=100, line_width=1, line_color="#999999")
                 
-                fig.update_traces(textposition='top center', marker=dict(size=10, color='#0A2540'))
+                # Plot each sector's tail
+                for sec, data in sector_rrg.items():
+                    ratios = data['Ratios']
+                    moms = data['Momentums']
+                    quad = data['Quadrant']
+                    
+                    color_map = {'Leading': '#4CAF50', 'Improving': '#2196F3', 'Weakening': '#FFC107', 'Lagging': '#F44336'}
+                    color = color_map.get(quad, '#333333')
+                    
+                    fig.add_trace(go.Scatter(
+                        x=ratios, y=moms, mode='lines+markers+text',
+                        name=sec,
+                        line=dict(color=color, width=3, shape='spline'),
+                        marker=dict(
+                            color=color,
+                            size=[6, 8, 10, 12, 16], # Increasing size for tail effect
+                            opacity=[0.3, 0.5, 0.7, 0.9, 1.0]
+                        ),
+                        text=["", "", "", "", sec], # Label only the head
+                        textposition="top center",
+                        textfont=dict(color='#0A2540', size=11, weight='bold')
+                    ))
                 
                 fig.update_xaxes(showgrid=False, title="JdK RS-Ratio")
                 fig.update_yaxes(showgrid=False, title="JdK RS-Momentum")
