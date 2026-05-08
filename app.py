@@ -123,18 +123,15 @@ with tab1:
             if sector_rrg:
                 fig = go.Figure()
                 
-                # Add colored quadrants (Sharpely Style)
-                fig.add_vrect(x0=0, x1=100, fillcolor="#FFEBEE", layer="below", line_width=0, opacity=0.8) # Bottom-Left (Lagging, Red)
-                fig.add_vrect(x0=100, x1=200, fillcolor="#E8F5E9", layer="below", line_width=0, opacity=0.8) # Top-Right (Leading, Green)
-                
+                # Add colored quadrants (Sharpely Style) using large boundaries
                 # Top Left (Improving, Blue)
-                fig.add_shape(type="rect", x0=0, y0=100, x1=100, y1=200, fillcolor="#E3F2FD", layer="below", line_width=0, opacity=1)
+                fig.add_shape(type="rect", x0=-1000, y0=100, x1=100, y1=1000, fillcolor="#E3F2FD", layer="below", line_width=0, opacity=1)
                 # Bottom Left (Lagging, Red) overrides the background
-                fig.add_shape(type="rect", x0=0, y0=0, x1=100, y1=100, fillcolor="#FFEBEE", layer="below", line_width=0, opacity=1)
+                fig.add_shape(type="rect", x0=-1000, y0=-1000, x1=100, y1=100, fillcolor="#FFEBEE", layer="below", line_width=0, opacity=1)
                 # Top Right (Leading, Green)
-                fig.add_shape(type="rect", x0=100, y0=100, x1=200, y1=200, fillcolor="#E8F5E9", layer="below", line_width=0, opacity=1)
+                fig.add_shape(type="rect", x0=100, y0=100, x1=1000, y1=1000, fillcolor="#E8F5E9", layer="below", line_width=0, opacity=1)
                 # Bottom Right (Weakening, Yellow)
-                fig.add_shape(type="rect", x0=100, y0=0, x1=200, y1=100, fillcolor="#FFF8E1", layer="below", line_width=0, opacity=1)
+                fig.add_shape(type="rect", x0=100, y0=-1000, x1=1000, y1=100, fillcolor="#FFF8E1", layer="below", line_width=0, opacity=1)
 
                 fig.add_hline(y=100, line_width=1, line_color="#999999")
                 fig.add_vline(x=100, line_width=1, line_color="#999999")
@@ -162,8 +159,23 @@ with tab1:
                         textfont=dict(color='#0A2540', size=11, weight='bold')
                     ))
                 
-                fig.update_xaxes(showgrid=False, title="JdK RS-Ratio")
-                fig.update_yaxes(showgrid=False, title="JdK RS-Momentum")
+                # Dynamic scaling to prevent squishing
+                min_x, max_x = 100, 100
+                min_y, max_y = 100, 100
+                
+                for sec, data in sector_rrg.items():
+                    ratios = data['Ratios']
+                    moms = data['Momentums']
+                    min_x = min(min_x, min(ratios))
+                    max_x = max(max_x, max(ratios))
+                    min_y = min(min_y, min(moms))
+                    max_y = max(max_y, max(moms))
+                
+                pad_x = max((max_x - min_x) * 0.15, 2)
+                pad_y = max((max_y - min_y) * 0.15, 2)
+                
+                fig.update_xaxes(range=[min(98, min_x - pad_x), max(102, max_x + pad_x)], showgrid=False, title="JdK RS-Ratio")
+                fig.update_yaxes(range=[min(98, min_y - pad_y), max(102, max_y + pad_y)], showgrid=False, title="JdK RS-Momentum")
                 
                 fig.update_layout(plot_bgcolor='#FFFFFF', paper_bgcolor='#FFFFFF', font=dict(color='#333333'), height=400, margin=dict(l=20, r=20, t=30, b=20))
                 st.plotly_chart(fig, use_container_width=True)

@@ -19,7 +19,9 @@ class SwingTradingAgents:
         self.sector_map = {
             'Bank': '^NSEBANK', 'IT': '^CNXIT', 'Auto': '^CNXAUTO',
             'Pharma': '^CNXPHARMA', 'Metal': '^CNXMETAL', 'FMCG': '^CNXFMCG',
-            'Energy': '^CNXENERGY'
+            'Energy': '^CNXENERGY', 'Realty': '^CNXREALTY', 'Media': '^CNXMEDIA',
+            'Infra': '^CNXINFRA', 'Fin Service': '^CNXFIN', 'PSU Bank': '^CNXPSUBANK',
+            'Pvt Bank': '^NIFTYPVT', 'Consumption': '^CNXCONSUM'
         }
         self.sector_rrg = {}
         self.benchmark_data = None
