@@ -119,65 +119,67 @@ with tab1:
                 st.warning("⚠️ CEO's Verdict: Market conditions are too hostile today. Keep capital in cash. No execution.")
                 
         with st.container(border=True):
-            st.subheader("🌐 Relative Rotation Graph (RRG)")
+            st.subheader("🌐 Sector RRG Map")
+            st.caption("Relative Rotation Graph")
             if sector_rrg:
                 fig = go.Figure()
                 
-                # Add colored quadrants (Sharpely Style) using large boundaries
-                # Top Left (Improving, Blue)
-                fig.add_shape(type="rect", x0=-1000, y0=100, x1=100, y1=1000, fillcolor="#E3F2FD", layer="below", line_width=0, opacity=1)
-                # Bottom Left (Lagging, Red) overrides the background
-                fig.add_shape(type="rect", x0=-1000, y0=-1000, x1=100, y1=100, fillcolor="#FFEBEE", layer="below", line_width=0, opacity=1)
-                # Top Right (Leading, Green)
-                fig.add_shape(type="rect", x0=100, y0=100, x1=1000, y1=1000, fillcolor="#E8F5E9", layer="below", line_width=0, opacity=1)
-                # Bottom Right (Weakening, Yellow)
-                fig.add_shape(type="rect", x0=100, y0=-1000, x1=1000, y1=100, fillcolor="#FFF8E1", layer="below", line_width=0, opacity=1)
-
-                fig.add_hline(y=100, line_width=1, line_color="#999999")
-                fig.add_vline(x=100, line_width=1, line_color="#999999")
-                
-                # Plot each sector's tail
+                # Dynamic scaling around 0
+                max_abs_val = 2
                 for sec, data in sector_rrg.items():
-                    ratios = data['Ratios']
-                    moms = data['Momentums']
+                    ratios = [r - 100 for r in data['Ratios']]
+                    moms = [m - 100 for m in data['Momentums']]
+                    max_abs_val = max(max_abs_val, max([abs(x) for x in ratios + moms]))
+                    
+                limit = max_abs_val * 1.1 # Padding
+                
+                # Mockup Style Quadrants (Centered at 0,0)
+                # Top Left (Improving, Blue)
+                fig.add_shape(type="rect", x0=-limit, y0=0, x1=0, y1=limit, fillcolor="#F0F8FF", layer="below", line_width=0)
+                # Bottom Left (Lagging, Red)
+                fig.add_shape(type="rect", x0=-limit, y0=-limit, x1=0, y1=0, fillcolor="#FFF0F5", layer="below", line_width=0)
+                # Top Right (Leading, Green)
+                fig.add_shape(type="rect", x0=0, y0=0, x1=limit, y1=limit, fillcolor="#F0FFF0", layer="below", line_width=0)
+                # Bottom Right (Weakening, Yellow)
+                fig.add_shape(type="rect", x0=0, y0=-limit, x1=limit, y1=0, fillcolor="#FFFFF0", layer="below", line_width=0)
+
+                # Crosshairs at 0,0
+                fig.add_hline(y=0, line_width=1, line_color="#333333")
+                fig.add_vline(x=0, line_width=1, line_color="#333333")
+                
+                # Plot each sector's tail and head
+                for sec, data in sector_rrg.items():
+                    # X is Momentum, Y is Ratio (Matching Mockup)
+                    ratios = [r - 100 for r in data['Ratios']]
+                    moms = [m - 100 for m in data['Momentums']]
                     quad = data['Quadrant']
                     
-                    color_map = {'Leading': '#4CAF50', 'Improving': '#2196F3', 'Weakening': '#FFC107', 'Lagging': '#F44336'}
+                    color_map = {'Leading': '#2E7D32', 'Improving': '#1565C0', 'Weakening': '#F9A825', 'Lagging': '#C62828'}
                     color = color_map.get(quad, '#333333')
                     
+                    # 1. Plot the tail (smooth, translucent line)
                     fig.add_trace(go.Scatter(
-                        x=ratios, y=moms, mode='lines+markers+text',
+                        x=moms, y=ratios, mode='lines', 
+                        showlegend=False,
+                        line=dict(color=color, width=4, shape='spline'),
+                        opacity=0.3,
+                        hoverinfo='skip'
+                    ))
+                    
+                    # 2. Plot the Head (Solid dot)
+                    fig.add_trace(go.Scatter(
+                        x=[moms[-1]], y=[ratios[-1]], mode='markers+text',
                         name=sec,
-                        line=dict(color=color, width=3, shape='spline'),
-                        marker=dict(
-                            color=color,
-                            size=[6, 8, 10, 12, 16], # Increasing size for tail effect
-                            opacity=[0.3, 0.5, 0.7, 0.9, 1.0]
-                        ),
-                        text=["", "", "", "", sec], # Label only the head
+                        marker=dict(color=color, size=14),
+                        text=[sec],
                         textposition="top center",
-                        textfont=dict(color='#0A2540', size=11, weight='bold')
+                        textfont=dict(color='#1E1E1E', size=11, weight='bold')
                     ))
                 
-                # Dynamic scaling to prevent squishing
-                min_x, max_x = 100, 100
-                min_y, max_y = 100, 100
+                fig.update_xaxes(range=[-limit, limit], showgrid=True, gridcolor='#EAEAEA', title="Momentum", zeroline=False)
+                fig.update_yaxes(range=[-limit, limit], showgrid=True, gridcolor='#EAEAEA', title="Relative Strength", zeroline=False)
                 
-                for sec, data in sector_rrg.items():
-                    ratios = data['Ratios']
-                    moms = data['Momentums']
-                    min_x = min(min_x, min(ratios))
-                    max_x = max(max_x, max(ratios))
-                    min_y = min(min_y, min(moms))
-                    max_y = max(max_y, max(moms))
-                
-                pad_x = max((max_x - min_x) * 0.15, 2)
-                pad_y = max((max_y - min_y) * 0.15, 2)
-                
-                fig.update_xaxes(range=[min(98, min_x - pad_x), max(102, max_x + pad_x)], showgrid=False, title="JdK RS-Ratio")
-                fig.update_yaxes(range=[min(98, min_y - pad_y), max(102, max_y + pad_y)], showgrid=False, title="JdK RS-Momentum")
-                
-                fig.update_layout(plot_bgcolor='#FFFFFF', paper_bgcolor='#FFFFFF', font=dict(color='#333333'), height=400, margin=dict(l=20, r=20, t=30, b=20))
+                fig.update_layout(plot_bgcolor='#FFFFFF', paper_bgcolor='#FFFFFF', font=dict(color='#333333'), height=450, margin=dict(l=20, r=20, t=30, b=20), showlegend=False)
                 st.plotly_chart(fig, use_container_width=True)
 
     with col_right:
