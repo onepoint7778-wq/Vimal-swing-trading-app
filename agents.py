@@ -243,6 +243,18 @@ class SwingTradingAgents:
         
         stocks_pool = ["TCS.NS", "RELIANCE.NS", "INFY.NS", "HDFCBANK.NS", "ITC.NS"]
         
+        # Download Nifty Benchmark for Relative Strength
+        nifty_df = pd.DataFrame()
+        try:
+            nifty = yf.Ticker("^NSEI")
+            nifty_df = nifty.history(period="1y")
+            if not nifty_df.empty:
+                if nifty_df.index.tz is not None:
+                    nifty_df.index = nifty_df.index.tz_localize(None)
+                nifty_df['Nifty_Return'] = nifty_df['Close'].pct_change(5)
+        except:
+            pass
+        
         for stock_name in stocks_pool:
             try:
                 ticker = f"{stock_name}.NS"
@@ -257,8 +269,9 @@ class SwingTradingAgents:
                 if df.index.tz is not None:
                     df.index = df.index.tz_localize(None)
                 
-                df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
-                df['EMA_200'] = df['Close'].ewm(span=200, adjust=False).mean()
+                # Institutional Strategy Metrics (No Indicators)
+                df['Stock_Return'] = df['Close'].pct_change(5)
+                df['Volume_SMA'] = df['Volume'].rolling(20).mean()
                 
                 # Filter df to only the requested backtest period!
                 df = df.loc[start_date:end_date]
@@ -278,9 +291,26 @@ class SwingTradingAgents:
                     if last_exit_date is not None and entry_date <= last_exit_date:
                         continue # Skip: Already holding this stock!
                     
-                    # Trend Filter (RELAXED): Only take trade if Price > 50 EMA (To ensure trades appear!)
-                    if df['Close'].iloc[i] < df['EMA_50'].iloc[i]:
+                    # FII Accumulation & Relative Strength Logic
+                    if pd.isna(df['Volume_SMA'].iloc[i]) or pd.isna(df['Stock_Return'].iloc[i]):
                         continue
+                        
+                    current_vol = df['Volume'].iloc[i]
+                    vol_sma = df['Volume_SMA'].iloc[i]
+                    stock_ret = df['Stock_Return'].iloc[i]
+                    
+                    # 1. Silent Accumulation (Volume shouldn't be exploding before we enter)
+                    if current_vol > (vol_sma * 1.5):
+                        continue
+                        
+                    # 2. Relative Strength vs NIFTY
+                    nifty_ret = 0
+                    if not nifty_df.empty and entry_date in nifty_df.index:
+                        nifty_ret = nifty_df.loc[entry_date, 'Nifty_Return']
+                        if pd.isna(nifty_ret): nifty_ret = 0
+                        
+                    if stock_ret <= 0 or stock_ret <= nifty_ret:
+                        continue # Skip: Stock is weak or underperforming Nifty!
                         
                     entry_price = float(df['Close'].iloc[i])
                     
