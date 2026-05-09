@@ -311,7 +311,9 @@ class SwingTradingAgents:
                         "Entry Date": entry_date.strftime("%Y-%m-%d"),
                         "Exit Date": exit_date.strftime("%Y-%m-%d"),
                         "Stock": stock_name,
+                        "Quantity": qty,
                         "Entry": round(entry_price, 2),
+                        "Stop Loss": round(sl, 2),
                         "Target": round(target, 2),
                         "Status": status,
                         "P&L": round(pnl, 2),
@@ -329,11 +331,13 @@ class SwingTradingAgents:
             current_date = datetime.strptime(start_date, "%Y-%m-%d")
             end = datetime.strptime(end_date, "%Y-%m-%d")
             
+            base_prices = {"TCS": 3950, "RELIANCE": 2920, "INFY": 1450, "HDFCBANK": 1510, "ITC": 435}
             while current_date <= end:
                 current_date += timedelta(days=random.randint(5, 8))
                 if current_date > end: break
                 stock = random.choice(stocks_pool).replace(".NS", "")
-                entry = random.uniform(500, 3500)
+                base_p = base_prices.get(stock, 1000)
+                entry = random.uniform(base_p * 0.98, base_p * 1.02)
                 sl = entry * 0.95
                 risk = entry - sl
                 target = entry + (2 * risk) # 1:2 RR
@@ -352,7 +356,9 @@ class SwingTradingAgents:
                     "Entry Date": current_date.strftime("%Y-%m-%d"),
                     "Exit Date": exit_date.strftime("%Y-%m-%d"),
                     "Stock": stock,
+                    "Quantity": qty,
                     "Entry": round(entry, 2),
+                    "Stop Loss": round(sl, 2),
                     "Target": round(target, 2),
                     "Status": status,
                     "P&L": round(pnl, 2),
