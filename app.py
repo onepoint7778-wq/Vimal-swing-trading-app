@@ -252,8 +252,8 @@ with tab_dash:
 
 with tab_back:
     # 3. BACKTESTING ENGINE
-    st.subheader("⏳ Historical Backtester (Jan '26 - Apr '26)")
-    st.markdown("> **RichRoad Strict Rules:** Turnover > 100Cr, Price > 200 EMA, RSI Exhaustion Filter, Target 1:2 RR.")
+    st.markdown("<div class='dashboard-header'>⏳ Historical Backtester (Jan '26 - Apr '26)</div>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #888;'>FII Institutional Rules: Fast Momentum, Nifty Relative Strength, Silent Accumulation (Low Vol), Target 1:2 RR.</p>", unsafe_allow_html=True)
     
     with st.spinner("Crunching historical market data..."):
         agents = SwingTradingAgents()

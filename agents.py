@@ -243,31 +243,37 @@ class SwingTradingAgents:
         
         stocks_pool = ["TCS.NS", "RELIANCE.NS", "INFY.NS", "HDFCBANK.NS", "ITC.NS"]
         
-        # Download Nifty Benchmark for Relative Strength
-        nifty_df = pd.DataFrame()
-        try:
-            nifty = yf.Ticker("^NSEI")
-            nifty_df = nifty.history(period="1y")
-            if not nifty_df.empty:
-                if nifty_df.index.tz is not None:
-                    nifty_df.index = nifty_df.index.tz_localize(None)
-                nifty_df['Nifty_Return'] = nifty_df['Close'].pct_change(5)
-        except:
-            pass
+        bulk_symbols = ["^NSEI"] + [f"{s}.NS" for s in stocks_pool]
         
+        try:
+            data = yf.download(bulk_symbols, period="1y", progress=False)
+            if data.empty:
+                raise Exception("Bulk download completely empty or rate limited.")
+            
+            close_prices = data['Close']
+            volume_data = data['Volume']
+            
+            if close_prices.index.tz is not None:
+                close_prices.index = close_prices.index.tz_localize(None)
+                volume_data.index = volume_data.index.tz_localize(None)
+                
+            nifty_df = pd.DataFrame({'Close': close_prices["^NSEI"].dropna()})
+            nifty_df['Nifty_Return'] = nifty_df['Close'].pct_change(5)
+        except Exception as e:
+            nifty_df = pd.DataFrame()
+            
         for stock_name in stocks_pool:
             try:
                 ticker = f"{stock_name}.NS"
-                stock = yf.Ticker(ticker)
-                
-                # Fetch 1 year of data so 200 EMA can calculate properly!
-                df = stock.history(period="1y")
-                if df.empty: 
+                if 'Close' not in data or ticker not in data['Close'].columns:
+                    raise Exception(f"Ticker {ticker} missing in bulk download.")
+                    
+                stock_close = close_prices[ticker].dropna()
+                stock_vol = volume_data[ticker].dropna()
+                if stock_close.empty: 
                     raise Exception("yfinance returned completely empty data for 1y.")
                 
-                # Remove timezone ONLY if it exists, to prevent crashing on naive datetimes
-                if df.index.tz is not None:
-                    df.index = df.index.tz_localize(None)
+                df = pd.DataFrame({'Close': stock_close, 'Volume': stock_vol})
                 
                 # Institutional Strategy Metrics (No Indicators)
                 df['Stock_Return'] = df['Close'].pct_change(5)
@@ -280,7 +286,6 @@ class SwingTradingAgents:
                 
                 # Simulate taking a trade every ~3 weeks if in uptrend
                 entry_days = range(10, len(df), 15)
-                stock_name = ticker.replace(".NS", "")
                 
                 last_exit_date = None
                 
