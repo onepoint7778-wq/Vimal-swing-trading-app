@@ -130,7 +130,7 @@ with col_left:
                 "Rating": ["⭐⭐⭐⭐⭐", "⭐⭐⭐⭐"][:len(stocks_df)]
             })
             st.dataframe(display_df, use_container_width=True, hide_index=True)
-            st.success(f"✅ Vimal (CEO): Capital locked at ₹{dynamic_risk:,.2f} risk per trade.")
+            st.success(f"✅ Vimal (CEO): Position Sizing set to 50% Capital (₹{current_capital/2:,.2f} per stock).")
         else:
             st.warning("⚠️ CEO's Verdict: No setups met the strict RichRoad criteria today. Keep capital in cash.")
 

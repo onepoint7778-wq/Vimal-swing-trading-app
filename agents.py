@@ -9,10 +9,9 @@ class SwingTradingAgents:
     def __init__(self, current_capital=50000):
         self.chartink_url = "https://chartink.com/screener/richroad-pivot-points-weekly-scan-2028"
         self.capital = current_capital
-        self.max_holdings = 3
-        # Max allocation is dynamically exactly Capital / 3
+        self.max_holdings = 2
+        # Exactly Capital / 2 (e.g. 25k on 50k capital)
         self.max_allocation = self.capital / self.max_holdings
-        # Risk per trade is strictly 2% of current capital (e.g., 1000 on 50k, 1500 on 75k)
         self.risk_per_trade = self.capital * 0.02
         self.benchmark_ticker = '^NSEI'
         
@@ -173,7 +172,7 @@ class SwingTradingAgents:
                 
                 sl = entry - (1.5 * atr)
                 risk = entry - sl
-                target = entry + (3 * risk)
+                target = entry + (2 * risk) # High Probability 1:2 RR
                 
                 # AI REJECTION LOGIC
                 # Relaxed RSI exhaustion filter to 80 to allow strong momentum, but still protect against extremes
@@ -209,10 +208,8 @@ class SwingTradingAgents:
                 remark = f"🚀 Safe Pick ({quad} Sector)"
                 score = sec_mom + (rsi * 0.5)
                 
-                # Position Sizing
-                raw_qty = self.risk_per_trade / risk if risk > 0 else 0
-                max_qty = self.max_allocation / entry
-                qty = math.floor(min(raw_qty, max_qty))
+                # Position Sizing: Exactly 50% of capital per stock
+                qty = math.floor(self.max_allocation / entry)
                 
                 if qty > 0:
                     results.append({
@@ -255,6 +252,9 @@ class SwingTradingAgents:
                 df = close_prices[ticker].dropna()
                 if df.empty: continue
                 
+                df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
+                df['EMA_200'] = df['Close'].ewm(span=200, adjust=False).mean()
+                
                 # Simulate taking a trade every ~3 weeks if in uptrend
                 entry_days = range(10, len(df), 15)
                 stock_name = ticker.replace(".NS", "")
@@ -262,14 +262,18 @@ class SwingTradingAgents:
                 for i in entry_days:
                     if i >= len(df) - 5: break
                     
+                    # Trend Filter: Only take trade if 50 EMA > 200 EMA and Price > 200 EMA
+                    if df.iloc[i] < df['EMA_200'].iloc[i] or df['EMA_50'].iloc[i] < df['EMA_200'].iloc[i]:
+                        continue
+                        
                     entry_date = df.index[i]
                     entry_price = float(df.iloc[i])
                     
                     sl = entry_price * 0.95 # 5% strict stop
                     risk = entry_price - sl
-                    target = entry_price + (3 * risk) # 1:3 RR
+                    target = entry_price + (2 * risk) # High Probability 1:2 RR
                     
-                    qty = math.floor((capital * 0.02) / risk)
+                    qty = math.floor((capital / 2) / entry_price)
                     if qty <= 0: qty = 1
                     
                     # Look forward to see what hits first
