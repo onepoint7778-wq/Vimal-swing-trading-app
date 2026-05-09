@@ -252,8 +252,9 @@ class SwingTradingAgents:
                 df = stock.history(period="1y")
                 if df.empty: continue
                 
-                # Remove timezone so slicing works!
-                df.index = df.index.tz_localize(None)
+                # Remove timezone ONLY if it exists, to prevent crashing on naive datetimes
+                if df.index.tz is not None:
+                    df.index = df.index.tz_localize(None)
                 
                 df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
                 df['EMA_200'] = df['Close'].ewm(span=200, adjust=False).mean()
@@ -331,7 +332,18 @@ class SwingTradingAgents:
                     })
                     
             except Exception as e:
-                print(f"Error backtesting {stock_name}: {e}")
+                trades.append({
+                    "Entry Date": "ERROR",
+                    "Exit Date": "ERROR",
+                    "Stock": stock_name,
+                    "Quantity": 0,
+                    "Entry": 0,
+                    "Stop Loss": 0,
+                    "Target": 0,
+                    "Status": f"Crash: {str(e)}",
+                    "P&L": 0,
+                    "Capital After": 0
+                })
                 continue
             
         df_trades = pd.DataFrame(trades)
