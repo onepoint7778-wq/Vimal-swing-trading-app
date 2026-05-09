@@ -243,44 +243,30 @@ class SwingTradingAgents:
         
         stocks_pool = ["TCS.NS", "RELIANCE.NS", "INFY.NS", "HDFCBANK.NS", "ITC.NS"]
         
-        bulk_symbols = ["^NSEI"] + [f"{s}.NS" for s in stocks_pool]
-        
+        # 1. Download NIFTY baseline strictly via Sequential yf.Ticker to avoid Streamlit threading bans!
+        nifty_df = pd.DataFrame()
         try:
-            import requests
-            session = requests.Session()
-            session.headers.update({
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            })
-            
-            # Fetch only 6 months of data (sufficient for 20-day SMA and reduces rate limit blocks)
-            data = yf.download(bulk_symbols, period="6mo", session=session, progress=False)
-            if data.empty:
-                raise Exception("Bulk download completely empty or rate limited.")
-            
-            close_prices = data['Close']
-            volume_data = data['Volume']
-            
-            if close_prices.index.tz is not None:
-                close_prices.index = close_prices.index.tz_localize(None)
-                volume_data.index = volume_data.index.tz_localize(None)
-                
-            nifty_df = pd.DataFrame({'Close': close_prices["^NSEI"].dropna()})
-            nifty_df['Nifty_Return'] = nifty_df['Close'].pct_change(5)
+            nifty = yf.Ticker("^NSEI")
+            nifty_df = nifty.history(period="6mo")
+            if not nifty_df.empty:
+                if nifty_df.index.tz is not None:
+                    nifty_df.index = nifty_df.index.tz_localize(None)
+                nifty_df['Nifty_Return'] = nifty_df['Close'].pct_change(5)
         except Exception as e:
-            nifty_df = pd.DataFrame()
+            print(f"Nifty baseline fetch error: {e}")
             
         for stock_name in stocks_pool:
             try:
                 ticker = f"{stock_name}.NS"
-                if 'Close' not in data or ticker not in data['Close'].columns:
-                    raise Exception(f"Ticker {ticker} missing in bulk download.")
-                    
-                stock_close = close_prices[ticker].dropna()
-                stock_vol = volume_data[ticker].dropna()
-                if stock_close.empty: 
-                    raise Exception("yfinance returned completely empty data for 1y.")
+                stock = yf.Ticker(ticker)
                 
-                df = pd.DataFrame({'Close': stock_close, 'Volume': stock_vol})
+                # Fetch data sequentially (this matches the Live Dashboard logic which works perfectly!)
+                df = stock.history(period="6mo")
+                if df.empty: 
+                    raise Exception("yfinance returned completely empty data for 6mo.")
+                
+                if df.index.tz is not None:
+                    df.index = df.index.tz_localize(None)
                 
                 # Institutional Strategy Metrics (No Indicators)
                 df['Stock_Return'] = df['Close'].pct_change(5)
