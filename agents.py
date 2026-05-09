@@ -264,11 +264,11 @@ class SwingTradingAgents:
                     if i >= len(df) - 5: break
                     
                     # Trend Filter: Only take trade if 50 EMA > 200 EMA and Price > 200 EMA
-                    if df.iloc[i] < df['EMA_200'].iloc[i] or df['EMA_50'].iloc[i] < df['EMA_200'].iloc[i]:
+                    if df['Close'].iloc[i] < df['EMA_200'].iloc[i] or df['EMA_50'].iloc[i] < df['EMA_200'].iloc[i]:
                         continue
                         
                     entry_date = df.index[i]
-                    entry_price = float(df.iloc[i])
+                    entry_price = float(df['Close'].iloc[i])
                     
                     sl = entry_price * 0.95 # 5% strict stop
                     risk = entry_price - sl
@@ -283,7 +283,7 @@ class SwingTradingAgents:
                     status = "Open"
                     
                     for j in range(i+1, len(df)):
-                        current_price = float(df.iloc[j])
+                        current_price = float(df['Close'].iloc[j])
                         if current_price >= target:
                             exit_price = target
                             exit_date = df.index[j]
@@ -297,7 +297,7 @@ class SwingTradingAgents:
                             
                     # If it didn't hit either by the end of the data, force close
                     if status == "Open":
-                        exit_price = float(df.iloc[-1])
+                        exit_price = float(df['Close'].iloc[-1])
                         exit_date = df.index[-1]
                         status = "Won" if exit_price > entry_price else "Lost"
                         
