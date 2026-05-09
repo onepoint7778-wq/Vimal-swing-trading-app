@@ -246,7 +246,14 @@ class SwingTradingAgents:
         bulk_symbols = ["^NSEI"] + [f"{s}.NS" for s in stocks_pool]
         
         try:
-            data = yf.download(bulk_symbols, period="1y", progress=False)
+            import requests
+            session = requests.Session()
+            session.headers.update({
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            })
+            
+            # Fetch only 6 months of data (sufficient for 20-day SMA and reduces rate limit blocks)
+            data = yf.download(bulk_symbols, period="6mo", session=session, progress=False)
             if data.empty:
                 raise Exception("Bulk download completely empty or rate limited.")
             
