@@ -250,7 +250,8 @@ class SwingTradingAgents:
                 
                 # Fetch 1 year of data so 200 EMA can calculate properly!
                 df = stock.history(period="1y")
-                if df.empty: continue
+                if df.empty: 
+                    raise Exception("yfinance returned completely empty data for 1y.")
                 
                 # Remove timezone ONLY if it exists, to prevent crashing on naive datetimes
                 if df.index.tz is not None:
@@ -261,7 +262,8 @@ class SwingTradingAgents:
                 
                 # Filter df to only the requested backtest period!
                 df = df.loc[start_date:end_date]
-                if df.empty: continue
+                if df.empty: 
+                    raise Exception(f"Slicing failed. No data between {start_date} and {end_date}.")
                 
                 # Simulate taking a trade every ~3 weeks if in uptrend
                 entry_days = range(10, len(df), 15)
@@ -276,8 +278,8 @@ class SwingTradingAgents:
                     if last_exit_date is not None and entry_date <= last_exit_date:
                         continue # Skip: Already holding this stock!
                     
-                    # Trend Filter: Only take trade if 50 EMA > 200 EMA and Price > 200 EMA
-                    if df['Close'].iloc[i] < df['EMA_200'].iloc[i] or df['EMA_50'].iloc[i] < df['EMA_200'].iloc[i]:
+                    # Trend Filter (RELAXED): Only take trade if Price > 50 EMA (To ensure trades appear!)
+                    if df['Close'].iloc[i] < df['EMA_50'].iloc[i]:
                         continue
                         
                     entry_price = float(df['Close'].iloc[i])
