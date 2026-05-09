@@ -243,14 +243,17 @@ class SwingTradingAgents:
         
         stocks_pool = ["TCS.NS", "RELIANCE.NS", "INFY.NS", "HDFCBANK.NS", "ITC.NS"]
         
-        try:
-            for stock_name in stocks_pool:
+        for stock_name in stocks_pool:
+            try:
                 ticker = f"{stock_name}.NS"
                 stock = yf.Ticker(ticker)
                 
                 # Fetch 1 year of data so 200 EMA can calculate properly!
                 df = stock.history(period="1y")
                 if df.empty: continue
+                
+                # Remove timezone so slicing works!
+                df.index = df.index.tz_localize(None)
                 
                 df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
                 df['EMA_200'] = df['Close'].ewm(span=200, adjust=False).mean()
@@ -263,14 +266,19 @@ class SwingTradingAgents:
                 entry_days = range(10, len(df), 15)
                 stock_name = ticker.replace(".NS", "")
                 
+                last_exit_date = None
+                
                 for i in entry_days:
                     if i >= len(df) - 5: break
+                    
+                    entry_date = df.index[i]
+                    if last_exit_date is not None and entry_date <= last_exit_date:
+                        continue # Skip: Already holding this stock!
                     
                     # Trend Filter: Only take trade if 50 EMA > 200 EMA and Price > 200 EMA
                     if df['Close'].iloc[i] < df['EMA_200'].iloc[i] or df['EMA_50'].iloc[i] < df['EMA_200'].iloc[i]:
                         continue
                         
-                    entry_date = df.index[i]
                     entry_price = float(df['Close'].iloc[i])
                     
                     sl = entry_price * 0.95 # 5% strict stop
@@ -304,6 +312,8 @@ class SwingTradingAgents:
                         exit_date = df.index[-1]
                         status = "Won" if exit_price > entry_price else "Lost"
                         
+                    last_exit_date = exit_date
+                        
                     pnl = (exit_price - entry_price) * qty
                     capital += pnl
                     
@@ -320,50 +330,9 @@ class SwingTradingAgents:
                         "Capital After": round(capital, 2)
                     })
                     
-            # If still zero trades, simulate a few real prices just to not show blank
-            if len(trades) == 0:
-                raise Exception("Zero trades found, fallback to simulated real prices")
-                
-        except Exception as e:
-            # Fallback if yfinance totally blocks it on cloud
-            import random
-            capital = 50000
-            current_date = datetime.strptime(start_date, "%Y-%m-%d")
-            end = datetime.strptime(end_date, "%Y-%m-%d")
-            
-            base_prices = {"TCS": 3950, "RELIANCE": 2920, "INFY": 1450, "HDFCBANK": 1510, "ITC": 435}
-            while current_date <= end:
-                current_date += timedelta(days=random.randint(5, 8))
-                if current_date > end: break
-                stock = random.choice(stocks_pool).replace(".NS", "")
-                base_p = base_prices.get(stock, 1000)
-                entry = random.uniform(base_p * 0.98, base_p * 1.02)
-                sl = entry * 0.95
-                risk = entry - sl
-                target = entry + (2 * risk) # 1:2 RR
-                qty = math.floor((capital / 2) / entry)
-                is_winner = random.random() < 0.70 # 70% win rate
-                if is_winner:
-                    pnl = (target - entry) * qty
-                    status = "Won"
-                    exit_date = current_date + timedelta(days=random.randint(10, 25))
-                else:
-                    pnl = (sl - entry) * qty
-                    status = "Lost"
-                    exit_date = current_date + timedelta(days=random.randint(3, 10))
-                capital += pnl
-                trades.append({
-                    "Entry Date": current_date.strftime("%Y-%m-%d"),
-                    "Exit Date": exit_date.strftime("%Y-%m-%d"),
-                    "Stock": stock,
-                    "Quantity": qty,
-                    "Entry": round(entry, 2),
-                    "Stop Loss": round(sl, 2),
-                    "Target": round(target, 2),
-                    "Status": status,
-                    "P&L": round(pnl, 2),
-                    "Capital After": round(capital, 2)
-                })
+            except Exception as e:
+                print(f"Error backtesting {stock_name}: {e}")
+                continue
             
         df_trades = pd.DataFrame(trades)
         if df_trades.empty:

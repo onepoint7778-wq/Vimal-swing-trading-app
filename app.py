@@ -74,7 +74,7 @@ agents_list = [
     "Vimal (The CEO)", 
     "Vikram (Risk Manager)", 
     "Amit (Sector Analyst)", 
-    "Rahul (Data Miner)"
+    "Rahul (Chartink Screener)"
 ]
 
 if "chat_histories" not in st.session_state:
