@@ -110,8 +110,8 @@ with col_left:
     @st.cache_data(ttl=3600)
     def fetch_data(capital):
         agents = SwingTradingAgents(current_capital=capital)
-        stocks_df = agents.run_pipeline()
-        return stocks_df, agents.logs
+        sector_rrg, stocks_df, dynamic_risk, logs = agents.run_pipeline()
+        return sector_rrg, stocks_df, dynamic_risk, logs
 
     with st.spinner(f"🚀 Processing Live Market Data..."):
         sector_rrg, stocks_df, dynamic_risk, logs = fetch_data(current_capital)
