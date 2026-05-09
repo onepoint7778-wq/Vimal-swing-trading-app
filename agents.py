@@ -249,9 +249,10 @@ class SwingTradingAgents:
             close_prices = data['Close']
             
             for ticker in stocks_pool:
-                df = close_prices[ticker].dropna()
-                if df.empty: continue
+                series = close_prices[ticker].dropna()
+                if series.empty: continue
                 
+                df = pd.DataFrame({'Close': series})
                 df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
                 df['EMA_200'] = df['Close'].ewm(span=200, adjust=False).mean()
                 
