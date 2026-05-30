@@ -7,6 +7,8 @@ from datetime import datetime
 import time
 import json
 import os
+import hashlib
+import requests
 
 try:
     from streamlit_gsheets import GSheetsConnection
@@ -25,7 +27,13 @@ def load_config():
                 return json.load(f)
         except:
             pass
-    return {"use_fyers": False, "fyers_app_id": "", "fyers_token": ""}
+    return {
+        "use_fyers": False,
+        "fyers_app_id": "",
+        "fyers_secret_key": "",
+        "fyers_token": "",
+        "fyers_redirect_uri": "https://vimal-swing-trading-app-st43utvpyng3zswmkaqot2.streamlit.app/"
+    }
 
 def save_config(config_data):
     try:
@@ -40,8 +48,64 @@ if "use_fyers" not in st.session_state:
     st.session_state.use_fyers = config.get("use_fyers", False)
 if "fyers_app_id" not in st.session_state:
     st.session_state.fyers_app_id = config.get("fyers_app_id", "")
+if "fyers_secret_key" not in st.session_state:
+    st.session_state.fyers_secret_key = config.get("fyers_secret_key", "")
 if "fyers_token" not in st.session_state:
     st.session_state.fyers_token = config.get("fyers_token", "")
+if "fyers_redirect_uri" not in st.session_state:
+    st.session_state.fyers_redirect_uri = config.get("fyers_redirect_uri", "https://vimal-swing-trading-app-st43utvpyng3zswmkaqot2.streamlit.app/")
+
+# --- AUTOMATIC FYERS AUTH CODE DETECTION ---
+auth_code = st.query_params.get("auth_code")
+if auth_code:
+    # Use saved config values to authenticate
+    app_id = config.get("fyers_app_id", "")
+    secret_key = config.get("fyers_secret_key", "")
+    
+    if app_id and secret_key:
+        with st.spinner("🔑 Validating Fyers Auth Code & Generating Token..."):
+            try:
+                # 1. Generate appIdHash (SHA-256 of app_id:secret_key)
+                hash_input = f"{app_id}:{secret_key}"
+                app_id_hash = hashlib.sha256(hash_input.encode()).hexdigest()
+                
+                # 2. Call validate-authcode endpoint
+                val_url = "https://api-t1.fyers.in/api/v3/validate-authcode"
+                payload = {
+                    "grant_type": "authorization_code",
+                    "appIdHash": app_id_hash,
+                    "code": auth_code
+                }
+                headers = {"Content-Type": "application/json"}
+                
+                res = requests.post(val_url, json=payload, headers=headers)
+                if res.status_code == 200:
+                    res_data = res.json()
+                    if res_data.get("s") == "ok" and "access_token" in res_data:
+                        token = res_data["access_token"]
+                        st.session_state.fyers_token = token
+                        st.session_state.use_fyers = True
+                        
+                        # Save updated config
+                        config["fyers_token"] = token
+                        config["use_fyers"] = True
+                        save_config(config)
+                        
+                        st.success("🎉 Successfully authenticated with Fyers API!")
+                        st.balloons()
+                        time.sleep(2)
+                    else:
+                        st.error(f"Fyers Auth Failed: {res_data.get('message', 'Unknown error')}")
+                else:
+                    st.error(f"Fyers Server Error (HTTP {res.status_code}): {res.text}")
+            except Exception as e:
+                st.error(f"Error during authentication: {e}")
+            
+            # Clear query params
+            st.query_params.clear()
+    else:
+        st.warning("⚠️ Auth code received, but App ID or Secret Key was not configured/saved. Please configure them first and retry.")
+        st.query_params.clear()
 
 # --- STREAMLIT SIDEBAR SETTINGS ---
 with st.sidebar:
@@ -54,8 +118,17 @@ with st.sidebar:
     
     use_fyers = (provider == "Fyers API (Safe & Fast)")
     fyers_app_id = st.text_input("Fyers App ID (Client ID):", value=st.session_state.fyers_app_id)
-    fyers_token = st.text_input("Fyers Access Token:", value=st.session_state.fyers_token, type="password")
+    fyers_secret_key = st.text_input("Fyers Secret Key:", value=st.session_state.fyers_secret_key, type="password")
+    fyers_redirect_uri = st.text_input("Redirect URI (Registered in Fyers App):", value=st.session_state.fyers_redirect_uri)
+    fyers_token = st.text_input("Fyers Access Token (Auto-generated or Manual):", value=st.session_state.fyers_token, type="password")
     
+    if fyers_app_id and fyers_secret_key and fyers_redirect_uri:
+        login_url = f"https://api-t1.fyers.in/api/v3/generate-authcode?client_id={fyers_app_id}&redirect_uri={fyers_redirect_uri}&response_type=code&state=sample_state"
+        st.markdown(f'<a href="{login_url}" target="_blank" style="text-decoration:none;"><button style="width:100%; border:none; background-color:#1A73E8; color:white; padding:10px; border-radius:6px; cursor:pointer; font-weight:bold; margin-bottom:10px;">🔑 Log In & Generate Access Token</button></a>', unsafe_allow_html=True)
+        st.caption("💡 Steps: (1) Save Settings first, (2) Click button above to login & authorize, (3) It will redirect back and set token.")
+    else:
+        st.info("ℹ️ Enter App ID, Secret Key, and Redirect URI, then Save to enable Fyers auto-login.")
+        
     st.markdown("### 📊 Strategy Settings")
     timeframe_label = st.selectbox(
         "Select Strength Lookback Timeframe:",
@@ -67,23 +140,19 @@ with st.sidebar:
     if st.button("💾 Save & Apply Settings"):
         st.session_state.use_fyers = use_fyers
         st.session_state.fyers_app_id = fyers_app_id
+        st.session_state.fyers_secret_key = fyers_secret_key
+        st.session_state.fyers_redirect_uri = fyers_redirect_uri
         st.session_state.fyers_token = fyers_token
         
         save_config({
             "use_fyers": use_fyers,
             "fyers_app_id": fyers_app_id,
+            "fyers_secret_key": fyers_secret_key,
+            "fyers_redirect_uri": fyers_redirect_uri,
             "fyers_token": fyers_token
         })
         st.success("Settings saved successfully!")
         st.rerun()
-
-    st.markdown("""
-    ---
-    **Fyers Token Rules:**
-    * App ID and Access Token are required.
-    * Generate tokens at [Fyers API Portal](https://myapi.fyers.in/).
-    * Per SEBI regulations, tokens expire in **24 hours**. Please update daily.
-    """)
 
 # --- TRADELOGIC UI THEME ---
 st.markdown("""
