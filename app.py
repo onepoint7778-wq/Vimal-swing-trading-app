@@ -32,7 +32,12 @@ def load_config():
         "fyers_app_id": "",
         "fyers_secret_key": "",
         "fyers_token": "",
-        "fyers_redirect_uri": "https://vimal-swing-trading-app-st43utvpyng3zswmkaqot2.streamlit.app/"
+        "fyers_redirect_uri": "https://vimal-swing-trading-app-st43utvpyng3zswmkaqot2.streamlit.app/",
+        "chartink_url": "https://chartink.com/screener/richroad-pivot-points-weekly-scan-2028",
+        "enable_market_filter": False,
+        "enable_stock_200_ema": True,
+        "min_sl_pct": 3.5,
+        "rr_ratio": "1:2"
     }
 
 def save_config(config_data):
@@ -54,6 +59,16 @@ if "fyers_token" not in st.session_state:
     st.session_state.fyers_token = config.get("fyers_token", "")
 if "fyers_redirect_uri" not in st.session_state:
     st.session_state.fyers_redirect_uri = config.get("fyers_redirect_uri", "https://vimal-swing-trading-app-st43utvpyng3zswmkaqot2.streamlit.app/")
+if "chartink_url" not in st.session_state:
+    st.session_state.chartink_url = config.get("chartink_url", "https://chartink.com/screener/richroad-pivot-points-weekly-scan-2028")
+if "enable_market_filter" not in st.session_state:
+    st.session_state.enable_market_filter = config.get("enable_market_filter", False)
+if "enable_stock_200_ema" not in st.session_state:
+    st.session_state.enable_stock_200_ema = config.get("enable_stock_200_ema", True)
+if "min_sl_pct" not in st.session_state:
+    st.session_state.min_sl_pct = config.get("min_sl_pct", 3.5)
+if "rr_ratio" not in st.session_state:
+    st.session_state.rr_ratio = config.get("rr_ratio", "1:2")
 
 # --- AUTOMATIC FYERS AUTH CODE DETECTION ---
 auth_code = st.query_params.get("auth_code")
@@ -137,19 +152,37 @@ with st.sidebar:
     )
     lookback_days = 5 if "1 Week" in timeframe_label else 20
     
+    chartink_url = st.text_input("Chartink Scanner URL:", value=st.session_state.chartink_url)
+    
+    st.markdown("#### ⚙️ Scanner & Backtest Controls")
+    enable_market_filter = st.checkbox("Enable Market Filter (Nifty > 50 EMA)", value=st.session_state.enable_market_filter, help="Blocks new entries when Nifty is below 50 EMA. Highly recommended for bad/crash markets.")
+    enable_stock_200_ema = st.checkbox("Enable Stock Filter (Stock > 200 EMA)", value=st.session_state.enable_stock_200_ema, help="Ensures selected stocks are in long term uptrend.")
+    min_sl_pct = st.slider("Minimum Stop Loss %:", min_value=1.5, max_value=8.0, value=float(st.session_state.min_sl_pct), step=0.5, help="Minimum space for stop loss to avoid intraday noise whipsaw.")
+    rr_label = st.selectbox("Risk-Reward Ratio:", ["1:1.5", "1:2", "1:2.5", "1:3"], index=["1:1.5", "1:2", "1:2.5", "1:3"].index(st.session_state.rr_ratio))
+    
     if st.button("💾 Save & Apply Settings"):
         st.session_state.use_fyers = use_fyers
         st.session_state.fyers_app_id = fyers_app_id
         st.session_state.fyers_secret_key = fyers_secret_key
         st.session_state.fyers_redirect_uri = fyers_redirect_uri
         st.session_state.fyers_token = fyers_token
+        st.session_state.chartink_url = chartink_url
+        st.session_state.enable_market_filter = enable_market_filter
+        st.session_state.enable_stock_200_ema = enable_stock_200_ema
+        st.session_state.min_sl_pct = min_sl_pct
+        st.session_state.rr_ratio = rr_label
         
         save_config({
             "use_fyers": use_fyers,
             "fyers_app_id": fyers_app_id,
             "fyers_secret_key": fyers_secret_key,
             "fyers_redirect_uri": fyers_redirect_uri,
-            "fyers_token": fyers_token
+            "fyers_token": fyers_token,
+            "chartink_url": chartink_url,
+            "enable_market_filter": enable_market_filter,
+            "enable_stock_200_ema": enable_stock_200_ema,
+            "min_sl_pct": min_sl_pct,
+            "rr_ratio": rr_label
         })
         st.success("Settings saved successfully!")
         st.rerun()
@@ -244,14 +277,21 @@ with tab_dash:
 
     with col_left:
         @st.cache_data(ttl=3600)
-        def fetch_data(capital, use_fyers, fyers_app_id, fyers_token, lookback):
+        def fetch_data(capital, use_fyers, fyers_app_id, fyers_token, lookback, chartink_url, enable_market_filter, enable_stock_200_ema, min_sl_pct, rr_ratio):
             agents = SwingTradingAgents(
                 current_capital=capital,
                 use_fyers=use_fyers,
                 fyers_app_id=fyers_app_id,
-                fyers_token=fyers_token
+                fyers_token=fyers_token,
+                chartink_url=chartink_url
             )
-            sector_rrg, stocks_df, dynamic_risk, logs, df_pipeline = agents.run_pipeline(lookback_days=lookback)
+            sector_rrg, stocks_df, dynamic_risk, logs, df_pipeline = agents.run_pipeline(
+                lookback_days=lookback,
+                enable_market_filter=enable_market_filter,
+                enable_stock_200_ema=enable_stock_200_ema,
+                min_sl_pct=min_sl_pct / 100.0,
+                rr_ratio=float(rr_ratio.split(":")[1])
+            )
             return sector_rrg, stocks_df, dynamic_risk, logs, df_pipeline
 
         with st.spinner(f"🚀 Processing Live Market Data..."):
@@ -260,8 +300,21 @@ with tab_dash:
                 st.session_state.use_fyers,
                 st.session_state.fyers_app_id,
                 st.session_state.fyers_token,
-                lookback_days
+                lookback_days,
+                st.session_state.chartink_url,
+                st.session_state.enable_market_filter,
+                st.session_state.enable_stock_200_ema,
+                st.session_state.min_sl_pct,
+                st.session_state.rr_ratio
             )
+
+        # Check if fetch failed (usually due to rate limits or invalid credentials)
+        if df_pipeline is None or df_pipeline.empty:
+            st.error("⚠️ **Market Data Connection Error:** Unable to fetch Nifty 50 index data or sector data.\n\n"
+                     "* **If using yfinance:** Streamlit Cloud servers are frequently blocked by Yahoo Finance due to rate limits. "
+                     "Please switch to **Fyers API** in the sidebar settings for a guaranteed stable and fast data feed.\n"
+                     "* **If using Fyers API:** Please make sure you have entered the correct Fyers App ID, Secret Key, and Redirect URI, "
+                     "clicked 'Save Settings', and then successfully logged in via the 'Log In & Generate Access Token' button.")
 
         # 1. TOP 2 STOCKS TABLE
         with st.container(border=True):
@@ -430,9 +483,18 @@ with tab_back:
         agents = SwingTradingAgents(
             use_fyers=st.session_state.use_fyers,
             fyers_app_id=st.session_state.fyers_app_id,
-            fyers_token=st.session_state.fyers_token
+            fyers_token=st.session_state.fyers_token,
+            chartink_url=st.session_state.chartink_url
         )
-        bt_df, metrics = agents.run_backtest(start_date="2026-01-01", end_date="2026-04-30", lookback_days=lookback_days)
+        bt_df, metrics = agents.run_backtest(
+            start_date="2026-01-01", 
+            end_date="2026-04-30", 
+            lookback_days=lookback_days,
+            enable_market_filter=st.session_state.enable_market_filter,
+            enable_stock_200_ema=st.session_state.enable_stock_200_ema,
+            min_sl_pct=float(st.session_state.min_sl_pct) / 100.0,
+            rr_ratio=float(st.session_state.rr_ratio.split(":")[1])
+        )
         
     with st.container(border=True):
         c1, c2, c3, c4 = st.columns(4)
