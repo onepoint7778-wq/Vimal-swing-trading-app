@@ -251,11 +251,11 @@ with tab_dash:
                 fyers_app_id=fyers_app_id,
                 fyers_token=fyers_token
             )
-            sector_rrg, stocks_df, dynamic_risk, logs = agents.run_pipeline(lookback_days=lookback)
-            return sector_rrg, stocks_df, dynamic_risk, logs
+            sector_rrg, stocks_df, dynamic_risk, logs, df_pipeline = agents.run_pipeline(lookback_days=lookback)
+            return sector_rrg, stocks_df, dynamic_risk, logs, df_pipeline
 
         with st.spinner(f"🚀 Processing Live Market Data..."):
-            sector_rrg, stocks_df, dynamic_risk, logs = fetch_data(
+            sector_rrg, stocks_df, dynamic_risk, logs, df_pipeline = fetch_data(
                 current_capital,
                 st.session_state.use_fyers,
                 st.session_state.fyers_app_id,
@@ -263,27 +263,23 @@ with tab_dash:
                 lookback_days
             )
 
-        # 1. TOP 2 STOCKS TABLE (SCREENSHOT EXACT MATCH)
+        # 1. TOP 2 STOCKS TABLE
         with st.container(border=True):
-            st.subheader("Top 2 Stocks")
+            st.subheader("🎯 Top 2 Stocks (Setup Confirmed)")
             if stocks_df is not None and not stocks_df.empty:
                 display_df = pd.DataFrame({
                     "Symbol": stocks_df["Stock"],
                     "Name": stocks_df["Stock"] + " Ltd.",
-                    "Price": stocks_df["Entry (₹)"].apply(lambda x: f"${x:,.2f}"),
-                    "Change %": ["-0.23%", "+10.53%"][:len(stocks_df)],
-                    "Volume": ["369.8M", "177.7M"][:len(stocks_df)],
-                    "Trend": [[10, 15, 12, 20, 18], [20, 18, 22, 25, 24]][:len(stocks_df)],
-                    "Rating": ["⭐⭐⭐⭐⭐", "⭐⭐⭐⭐"][:len(stocks_df)]
+                    "Price": stocks_df["Entry (₹)"].apply(lambda x: f"₹{x:,.2f}"),
+                    "Stop Loss": stocks_df["Stop Loss (₹)"].apply(lambda x: f"₹{x:,.2f}"),
+                    "Target (1:2)": stocks_df["Target (₹)"].apply(lambda x: f"₹{x:,.2f}"),
+                    "Qty": stocks_df["Quantity"],
+                    "Max Risk": stocks_df["Max Risk (₹)"].apply(lambda x: f"₹{x:,.2f}"),
+                    "Remark": stocks_df["Remark"]
                 })
                 
                 st.dataframe(
                     display_df, 
-                    column_config={
-                        "Trend": st.column_config.LineChartColumn("Trend (5d)"),
-                        "Change %": st.column_config.TextColumn("Change %"),
-                        "Symbol": st.column_config.TextColumn("Symbol")
-                    },
                     use_container_width=True, 
                     hide_index=True
                 )
@@ -291,7 +287,30 @@ with tab_dash:
             else:
                 st.warning("⚠️ CEO's Verdict: No setups met the strict RichRoad criteria today. Keep capital in cash.")
 
-        # 2. SECTOR RRG MAP
+        # 2. SCANNING PIPELINE REPORT (NEW)
+        with st.container(border=True):
+            st.subheader("🔍 Complete Stock Scanning Report")
+            st.caption("AI Agents real-time multi-level filtering pipeline (Chartink candidates & Nifty heavyweights)")
+            if df_pipeline is not None and not df_pipeline.empty:
+                st.dataframe(
+                    df_pipeline,
+                    column_config={
+                        "Stock": st.column_config.TextColumn("Ticker", help="Stock Symbol"),
+                        "Sector Strong": st.column_config.TextColumn("Sector > Nifty?", help="Is the stock's sector outperforming Nifty 50?"),
+                        "RS Status": st.column_config.TextColumn("RS Filter", help="Is the stock outperforming both Nifty and its Sector?"),
+                        "Trend (20/50/200 EMA)": st.column_config.TextColumn("Trend Check", help="Is Close > EMA20 > EMA50 and Close > EMA200?"),
+                        "Volume Check": st.column_config.TextColumn("Vol Check", help="Is daily volume above the 20-day SMA?"),
+                        "Weekly Return": st.column_config.TextColumn("Weekly Return", help="Return this week (must be <= 10% to prevent chasing)"),
+                        "Status": st.column_config.TextColumn("Final Status"),
+                        "Reason": st.column_config.TextColumn("Filter Reason")
+                    },
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                st.info("No scanning pipeline data generated. Check market data connections.")
+
+        # 3. SECTOR RRG MAP
         with st.container(border=True):
             st.subheader("Sector RRG Map")
             st.caption("Relative Rotation Graph")
@@ -428,6 +447,37 @@ with tab_back:
         c6.metric("Avg Holding Days", metrics["Average Holding Days"])
         c7.metric("Best Trade Return", metrics["Best Trade"])
         c8.metric("Worst Trade Return", metrics["Worst Trade"])
+        
+    # --- CAPITAL GROWTH CURVE CHART ---
+    if not bt_df.empty:
+        with st.container(border=True):
+            cap_curve_data = [{"Date": "2026-01-01", "Capital (₹)": 50000.0}]
+            running_cap = 50000.0
+            for idx, row in bt_df.iterrows():
+                running_cap += float(row["P&L"])
+                cap_curve_data.append({
+                    "Date": row["Exit Date"],
+                    "Capital (₹)": running_cap
+                })
+            df_cap_curve = pd.DataFrame(cap_curve_data)
+            
+            fig_cap = px.line(
+                df_cap_curve,
+                x="Date",
+                y="Capital (₹)",
+                title="Capital Growth Curve (Starting: ₹50,000)",
+                markers=True
+            )
+            fig_cap.update_layout(
+                plot_bgcolor='#FFFFFF',
+                paper_bgcolor='#FFFFFF',
+                font=dict(color='#5F6368'),
+                height=350,
+                margin=dict(l=20, r=20, t=40, b=20),
+                xaxis=dict(showgrid=True, gridcolor='#F1F3F4'),
+                yaxis=dict(showgrid=True, gridcolor='#F1F3F4')
+            )
+            st.plotly_chart(fig_cap, use_container_width=True)
         
     st.subheader("Trade Log")
     st.dataframe(bt_df, use_container_width=True, hide_index=True)

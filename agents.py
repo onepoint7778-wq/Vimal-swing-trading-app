@@ -285,11 +285,22 @@ class SwingTradingAgents:
         try:
             if self.benchmark_data is None or len(self.benchmark_data) < lookback_days + 1:
                 raise Exception("Insufficient Nifty 50 benchmark data.")
+            
+            # Calculate Nifty 50 Return and 50 EMA for Market Trend Filter
+            self.benchmark_data_df = self.get_data_feed(self.benchmark_ticker, period='6mo')
+            if not self.benchmark_data_df.empty:
+                self.benchmark_data_df['EMA_50'] = self.benchmark_data_df['Close'].ewm(span=50, adjust=False).mean()
+                latest_nifty = self.benchmark_data_df.iloc[-1]
+                if latest_nifty['Close'] < latest_nifty['EMA_50']:
+                    self.logs['analyst'] += "⚠️ Market Filter: Nifty 50 is below its 50 EMA. Market is in correction. Keeping capital in cash.\n"
+                    # Return empty selection but with logs and empty pipeline report
+                    return self.sector_rrg, pd.DataFrame(), self.risk_per_trade, self.logs, pd.DataFrame(columns=["Stock", "Sector", "Sector Strong", "RS Status", "Trend (20/50/200 EMA)", "Volume Check", "Weekly Return", "Status", "Reason"])
+            
             nifty_ret = (self.benchmark_data.iloc[-1] / self.benchmark_data.iloc[-1 - lookback_days]) - 1
             self.logs['analyst'] += f"Nifty 50 Return ({lookback_days}d): {nifty_ret*100:.2f}%\n"
         except Exception as e:
             self.logs['analyst'] += f"Failed to fetch Nifty 50 benchmark return: {e}\n"
-            return {}, pd.DataFrame(), self.risk_per_trade, self.logs
+            return {}, pd.DataFrame(), self.risk_per_trade, self.logs, pd.DataFrame()
             
         for sec_name, sec_df in self.sector_dfs.items():
             if sec_name == 'Nifty 50': continue
@@ -308,10 +319,33 @@ class SwingTradingAgents:
         stocks = self.fetch_chartink_stocks()
         rs_passed_stocks = []
         final_picks = []
+        pipeline_data = []
         
         for symbol in stocks:
             sector = self.stock_sector_map.get(symbol.upper(), "Unknown")
+            sec_strong = "✅ Yes" if sector in strong_sectors else "❌ No"
+            
+            # Default pipeline values
+            rs_status = "❌ Failed"
+            trend_status = "❌ Failed"
+            vol_status = "❌ Failed"
+            weekly_return_str = "-"
+            status = "Filtered Out"
+            reason = ""
+            
             if sector not in strong_sectors:
+                reason = f"Sector '{sector}' is weak"
+                pipeline_data.append({
+                    "Stock": symbol,
+                    "Sector": sector,
+                    "Sector Strong": sec_strong,
+                    "RS Status": rs_status,
+                    "Trend (20/50/200 EMA)": trend_status,
+                    "Volume Check": vol_status,
+                    "Weekly Return": weekly_return_str,
+                    "Status": status,
+                    "Reason": reason
+                })
                 self.logs['risk'].append({
                     'Stock': symbol,
                     'Reason': f"Sector '{sector}' is not outperforming Nifty 50."
@@ -321,6 +355,18 @@ class SwingTradingAgents:
             try:
                 stock_df = self.get_data_feed(symbol, period='6mo')
                 if stock_df.empty or len(stock_df) < lookback_days + 1:
+                    reason = "No data available"
+                    pipeline_data.append({
+                        "Stock": symbol,
+                        "Sector": sector,
+                        "Sector Strong": sec_strong,
+                        "RS Status": rs_status,
+                        "Trend (20/50/200 EMA)": trend_status,
+                        "Volume Check": vol_status,
+                        "Weekly Return": weekly_return_str,
+                        "Status": status,
+                        "Reason": reason
+                    })
                     continue
                 
                 stock_close = stock_df['Close']
@@ -328,58 +374,89 @@ class SwingTradingAgents:
                 sector_ret = all_sectors_data.get(sector, -999)
                 
                 # Check relative strength outperformance
-                if stock_ret > nifty_ret and stock_ret > sector_ret:
-                    rs_passed_stocks.append({
-                        'Stock': symbol,
-                        'Sector': sector,
-                        'Stock Return': stock_ret,
-                        'Sector Return': sector_ret
+                rs_ok = stock_ret > nifty_ret and stock_ret > sector_ret
+                rs_status = "✅ Pass" if rs_ok else "❌ Failed"
+                
+                if not rs_ok:
+                    reason = f"Weak RS (Stock {stock_ret*100:.1f}%, Sector {sector_ret*100:.1f}%)"
+                    pipeline_data.append({
+                        "Stock": symbol,
+                        "Sector": sector,
+                        "Sector Strong": sec_strong,
+                        "RS Status": rs_status,
+                        "Trend (20/50/200 EMA)": trend_status,
+                        "Volume Check": vol_status,
+                        "Weekly Return": weekly_return_str,
+                        "Status": status,
+                        "Reason": reason
                     })
+                    self.logs['risk'].append({
+                        'Stock': symbol,
+                        'Reason': f"Stock return ({stock_ret*100:.1f}%) is weaker than Nifty or sector return."
+                    })
+                    continue
                     
-                    # Agent 3: Setup Scanner
-                    stock_df['EMA_20'] = stock_df['Close'].ewm(span=20, adjust=False).mean()
-                    stock_df['EMA_50'] = stock_df['Close'].ewm(span=50, adjust=False).mean()
-                    stock_df['Vol_SMA_20'] = stock_df['Volume'].rolling(20).mean()
-                    latest = stock_df.iloc[-1]
+                rs_passed_stocks.append({
+                    'Stock': symbol,
+                    'Sector': sector,
+                    'Stock Return': stock_ret,
+                    'Sector Return': sector_ret
+                })
+                
+                # Agent 3: Setup Scanner
+                stock_df['EMA_20'] = stock_df['Close'].ewm(span=20, adjust=False).mean()
+                stock_df['EMA_50'] = stock_df['Close'].ewm(span=50, adjust=False).mean()
+                stock_df['EMA_200'] = stock_df['Close'].ewm(span=200, adjust=False).mean()
+                stock_df['Vol_SMA_20'] = stock_df['Volume'].rolling(20).mean()
+                latest = stock_df.iloc[-1]
+                
+                # Trend condition: must be in strong bull market (Close > 20 EMA > 50 EMA and Close > 200 EMA)
+                is_uptrend = latest['Close'] > latest['EMA_20'] and latest['EMA_20'] > latest['EMA_50'] and latest['Close'] > latest['EMA_200']
+                trend_status = "✅ Pass" if is_uptrend else "❌ Failed"
+                
+                # Anti-chasing logic (max 10% move this week)
+                weekly_ret = (stock_close.iloc[-1] / stock_close.iloc[-5]) - 1
+                weekly_return_str = f"{weekly_ret*100:+.1f}%"
+                chase_ok = weekly_ret <= 0.10
+                
+                # Volume check
+                vol_ok = latest['Volume'] > latest['Vol_SMA_20']
+                vol_status = "✅ Pass" if vol_ok else "❌ Failed"
+                
+                if not is_uptrend:
+                    reason = "Close is not above EMA20 or EMA20 not above EMA50, or Close is below EMA200"
+                    self.logs['risk'].append({
+                        'Stock': symbol,
+                        'Reason': f"Stock Close ({latest['Close']:.2f}) is not in absolute bull trend (requires Close > EMA20 > EMA50 & Close > EMA200)."
+                    })
+                elif not chase_ok:
+                    reason = f"Weekly return ({weekly_ret*100:.1f}%) exceeds limit of 10%"
+                    self.logs['risk'].append({
+                        'Stock': symbol,
+                        'Reason': f"Stock weekly return ({weekly_ret*100:.1f}%) exceeds limit of 10% (Chasing)."
+                    })
+                elif not vol_ok:
+                    reason = f"Volume ({latest['Volume']/1e6:.1f}M) below 20-day average ({latest['Vol_SMA_20']/1e6:.1f}M)"
+                    self.logs['risk'].append({
+                        'Stock': symbol,
+                        'Reason': f"Volume ({latest['Volume']/1e6:.1f}M) below 20-day average ({latest['Vol_SMA_20']/1e6:.1f}M)."
+                    })
+                else:
+                    status = "Passed"
+                    reason = "Setup confirmed"
                     
-                    # Trend condition
-                    is_uptrend = latest['Close'] > latest['EMA_20'] and latest['EMA_20'] > latest['EMA_50']
-                    if not is_uptrend:
-                        self.logs['risk'].append({
-                            'Stock': symbol,
-                            'Reason': f"Stock Close ({latest['Close']:.2f}) is not above EMA 20 or EMA 20 not above EMA 50."
-                        })
-                        continue
-                        
-                    # Anti-chasing logic (max 10% move this week)
-                    weekly_ret = (stock_close.iloc[-1] / stock_close.iloc[-5]) - 1
-                    if weekly_ret > 0.10:
-                        self.logs['risk'].append({
-                            'Stock': symbol,
-                            'Reason': f"Stock weekly return ({weekly_ret*100:.1f}%) exceeds limit of 10%."
-                        })
-                        continue
-                        
-                    # Volume check
-                    if latest['Volume'] <= latest['Vol_SMA_20']:
-                        self.logs['risk'].append({
-                            'Stock': symbol,
-                            'Reason': f"Volume ({latest['Volume']/1e6:.1f}M) below 20-day average ({latest['Vol_SMA_20']/1e6:.1f}M)."
-                        })
-                        continue
-                        
-                    # Calculate stops and targets
                     entry = float(latest['Close'])
                     swing_low = float(stock_df['Low'].iloc[-5:].min())
                     sl = swing_low
-                    if sl >= entry * 0.98:
-                        sl = entry * 0.98
+                    
+                    # Capping stop loss between 4% and 8% to avoid whipsaws
+                    if sl >= entry * 0.96:
+                        sl = entry * 0.96
                     elif sl <= entry * 0.92:
                         sl = entry * 0.92
                         
                     risk = entry - sl
                     target = entry + (2 * risk)
-                    
                     qty = math.floor(self.max_allocation / entry)
                     
                     if qty > 0:
@@ -393,7 +470,30 @@ class SwingTradingAgents:
                             'Max Risk (₹)': round(qty * risk, 2),
                             'Remark': f"🚀 Setup Confirmed: Strong RS & Vol ({sector})"
                         })
+                
+                pipeline_data.append({
+                    "Stock": symbol,
+                    "Sector": sector,
+                    "Sector Strong": sec_strong,
+                    "RS Status": rs_status,
+                    "Trend (20/50/200 EMA)": trend_status,
+                    "Volume Check": vol_status,
+                    "Weekly Return": weekly_return_str,
+                    "Status": status,
+                    "Reason": reason
+                })
             except Exception as e:
+                pipeline_data.append({
+                    "Stock": symbol,
+                    "Sector": sector,
+                    "Sector Strong": sec_strong,
+                    "RS Status": "❌ Error",
+                    "Trend (20/50/200 EMA)": "❌ Error",
+                    "Volume Check": "❌ Error",
+                    "Weekly Return": "-",
+                    "Status": "Error",
+                    "Reason": str(e)
+                })
                 self.logs['risk'].append({
                     'Stock': symbol,
                     'Reason': f"Processing error: {e}"
@@ -405,7 +505,7 @@ class SwingTradingAgents:
             
         self.logs['analyst'] += f"Agent 2 (Stock Filter): Filtered {len(rs_passed_stocks)} stocks outperforming sector. Agent 3 (Setup Scanner): Final selection contains {len(df_final)} stocks."
         
-        return self.sector_rrg, df_final, self.risk_per_trade, self.logs
+        return self.sector_rrg, df_final, self.risk_per_trade, self.logs, pd.DataFrame(pipeline_data)
 
     def run_backtest(self, start_date="2026-01-01", end_date="2026-04-30", lookback_days=5):
         from datetime import datetime, timedelta
@@ -416,14 +516,17 @@ class SwingTradingAgents:
         # 1. Define backtest stock pool and sectors
         stocks_pool = ["TCS", "RELIANCE", "INFY", "HDFCBANK", "ITC", "ICICIBANK", "SBIN", "L&T", "BHARTIARTL", "KOTAKBANK"]
         
-        # Calculate fetch start date with 60 days buffer (to allow 50 EMA and lookbacks)
+        # Calculate fetch start date with 90 days buffer (to allow 200 EMA and lookbacks)
         sd_dt = datetime.strptime(start_date, "%Y-%m-%d")
-        fetch_start = (sd_dt - timedelta(days=60)).strftime("%Y-%m-%d")
+        fetch_start = (sd_dt - timedelta(days=90)).strftime("%Y-%m-%d")
         
         # 2. Pre-fetch NIFTY baseline
         nifty_df = self.get_data_feed(self.benchmark_ticker, start_date=fetch_start, end_date=end_date)
         if nifty_df.empty:
             return pd.DataFrame(), {"Total Trades": 0, "Wins": 0, "Losses": 0, "Win Rate": "0%", "Starting Capital": "₹50,000.00", "Final Capital": "₹50,000.00", "Net Profit": "₹0.00", "Average Return": "0.00%", "Average Holding Days": "0.0 Days", "Best Trade": "0.00%", "Worst Trade": "0.00%"}
+        
+        # Add Nifty 50 EMA for Market Trend Filter
+        nifty_df['EMA_50'] = nifty_df['Close'].ewm(span=50, adjust=False).mean()
             
         # Pre-fetch Sectors
         sector_dfs = {}
@@ -439,6 +542,7 @@ class SwingTradingAgents:
             if not df.empty:
                 df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
                 df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
+                df['EMA_200'] = df['Close'].ewm(span=200, adjust=False).mean() # Calculate EMA_200
                 df['Vol_SMA_20'] = df['Volume'].rolling(20).mean()
                 stock_dfs[symbol] = df
                 
@@ -476,7 +580,7 @@ class SwingTradingAgents:
                     is_exit = True
                     exit_price = position['Stop Loss']
                     status = "Lost"
-                elif position['holding_days'] >= 20: # 30 calendar days is approx 20 trading days
+                elif position['holding_days'] >= 20: # Approx 30 calendar days
                     is_exit = True
                     exit_price = close
                     status = "Won" if close > position['Entry'] else "Lost"
@@ -505,6 +609,11 @@ class SwingTradingAgents:
             
             # B. Filter and scan for new setups if we have capital space (max 2 positions)
             if len(active_trades) >= 2:
+                continue
+                
+            # Market Filter: If Nifty 50 is below its 50 EMA, we don't open new positions
+            latest_nifty = nifty_df.loc[current_date]
+            if latest_nifty['Close'] < latest_nifty['EMA_50']:
                 continue
                 
             # 1. Run Agent 1 (Sector Filter) at current_date
@@ -545,7 +654,8 @@ class SwingTradingAgents:
                 if stock_ret > nifty_ret and stock_ret > sector_ret:
                     # Agent 3: Setup Scanner
                     latest = stock_slice.iloc[-1]
-                    is_uptrend = latest['Close'] > latest['EMA_20'] and latest['EMA_20'] > latest['EMA_50']
+                    # Upward trend includes EMA_200 check to filter out long term weak stocks
+                    is_uptrend = latest['Close'] > latest['EMA_20'] and latest['EMA_20'] > latest['EMA_50'] and latest['Close'] > latest['EMA_200']
                     if not is_uptrend:
                         continue
                         
@@ -559,8 +669,10 @@ class SwingTradingAgents:
                     entry_price = float(latest['Close'])
                     swing_low = float(stock_slice['Low'].iloc[-5:].min())
                     sl = swing_low
-                    if sl >= entry_price * 0.98:
-                        sl = entry_price * 0.98
+                    
+                    # Adjust SL bounds (min 4% to avoid noise stop-outs, max 8%)
+                    if sl >= entry_price * 0.96:
+                        sl = entry_price * 0.96
                     elif sl <= entry_price * 0.92:
                         sl = entry_price * 0.92
                         
