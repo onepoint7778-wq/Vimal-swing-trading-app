@@ -34,9 +34,6 @@ def load_config():
         "fyers_token": "",
         "fyers_redirect_uri": "https://vimal-swing-trading-app-st43utvpyng3zswmkaqot2.streamlit.app/",
         "chartink_url": "https://chartink.com/screener/richroad-pivot-points-weekly-scan-2028",
-        "enable_market_filter": False,
-        "enable_stock_200_ema": True,
-        "min_sl_pct": 3.5,
         "rr_ratio": "1:2"
     }
 
@@ -61,12 +58,6 @@ if "fyers_redirect_uri" not in st.session_state:
     st.session_state.fyers_redirect_uri = config.get("fyers_redirect_uri", "https://vimal-swing-trading-app-st43utvpyng3zswmkaqot2.streamlit.app/")
 if "chartink_url" not in st.session_state:
     st.session_state.chartink_url = config.get("chartink_url", "https://chartink.com/screener/richroad-pivot-points-weekly-scan-2028")
-if "enable_market_filter" not in st.session_state:
-    st.session_state.enable_market_filter = config.get("enable_market_filter", False)
-if "enable_stock_200_ema" not in st.session_state:
-    st.session_state.enable_stock_200_ema = config.get("enable_stock_200_ema", True)
-if "min_sl_pct" not in st.session_state:
-    st.session_state.min_sl_pct = config.get("min_sl_pct", 3.5)
 if "rr_ratio" not in st.session_state:
     st.session_state.rr_ratio = config.get("rr_ratio", "1:2")
 
@@ -155,10 +146,9 @@ with st.sidebar:
     chartink_url = st.text_input("Chartink Scanner URL:", value=st.session_state.chartink_url)
     
     st.markdown("#### ⚙️ Scanner & Backtest Controls")
-    enable_market_filter = st.checkbox("Enable Market Filter (Nifty > 50 EMA)", value=st.session_state.enable_market_filter, help="Blocks new entries when Nifty is below 50 EMA. Highly recommended for bad/crash markets.")
-    enable_stock_200_ema = st.checkbox("Enable Stock Filter (Stock > 200 EMA)", value=st.session_state.enable_stock_200_ema, help="Ensures selected stocks are in long term uptrend.")
-    min_sl_pct = st.slider("Minimum Stop Loss %:", min_value=1.5, max_value=8.0, value=float(st.session_state.min_sl_pct), step=0.5, help="Minimum space for stop loss to avoid intraday noise whipsaw.")
-    rr_label = st.selectbox("Risk-Reward Ratio:", ["1:1.5", "1:2", "1:2.5", "1:3"], index=["1:1.5", "1:2", "1:2.5", "1:3"].index(st.session_state.rr_ratio))
+    rr_options = ["1:2", "1:2.5", "1:3"]
+    default_idx = rr_options.index(st.session_state.rr_ratio) if st.session_state.rr_ratio in rr_options else 0
+    rr_label = st.selectbox("Risk-Reward Ratio:", rr_options, index=default_idx)
     
     if st.button("💾 Save & Apply Settings"):
         st.session_state.use_fyers = use_fyers
@@ -167,9 +157,6 @@ with st.sidebar:
         st.session_state.fyers_redirect_uri = fyers_redirect_uri
         st.session_state.fyers_token = fyers_token
         st.session_state.chartink_url = chartink_url
-        st.session_state.enable_market_filter = enable_market_filter
-        st.session_state.enable_stock_200_ema = enable_stock_200_ema
-        st.session_state.min_sl_pct = min_sl_pct
         st.session_state.rr_ratio = rr_label
         
         save_config({
@@ -179,9 +166,6 @@ with st.sidebar:
             "fyers_redirect_uri": fyers_redirect_uri,
             "fyers_token": fyers_token,
             "chartink_url": chartink_url,
-            "enable_market_filter": enable_market_filter,
-            "enable_stock_200_ema": enable_stock_200_ema,
-            "min_sl_pct": min_sl_pct,
             "rr_ratio": rr_label
         })
         st.success("Settings saved successfully!")
@@ -277,7 +261,7 @@ with tab_dash:
 
     with col_left:
         @st.cache_data(ttl=3600)
-        def fetch_data(capital, use_fyers, fyers_app_id, fyers_token, lookback, chartink_url, enable_market_filter, enable_stock_200_ema, min_sl_pct, rr_ratio):
+        def fetch_data(capital, use_fyers, fyers_app_id, fyers_token, lookback, chartink_url, rr_ratio):
             agents = SwingTradingAgents(
                 current_capital=capital,
                 use_fyers=use_fyers,
@@ -287,9 +271,6 @@ with tab_dash:
             )
             sector_rrg, stocks_df, dynamic_risk, logs, df_pipeline = agents.run_pipeline(
                 lookback_days=lookback,
-                enable_market_filter=enable_market_filter,
-                enable_stock_200_ema=enable_stock_200_ema,
-                min_sl_pct=min_sl_pct / 100.0,
                 rr_ratio=float(rr_ratio.split(":")[1])
             )
             return sector_rrg, stocks_df, dynamic_risk, logs, df_pipeline
@@ -302,9 +283,6 @@ with tab_dash:
                 st.session_state.fyers_token,
                 lookback_days,
                 st.session_state.chartink_url,
-                st.session_state.enable_market_filter,
-                st.session_state.enable_stock_200_ema,
-                st.session_state.min_sl_pct,
                 st.session_state.rr_ratio
             )
 
@@ -351,7 +329,7 @@ with tab_dash:
                         "Stock": st.column_config.TextColumn("Ticker", help="Stock Symbol"),
                         "Sector Strong": st.column_config.TextColumn("Sector > Nifty?", help="Is the stock's sector outperforming Nifty 50?"),
                         "RS Status": st.column_config.TextColumn("RS Filter", help="Is the stock outperforming both Nifty and its Sector?"),
-                        "Trend (20/50/200 EMA)": st.column_config.TextColumn("Trend Check", help="Is Close > EMA20 > EMA50 and Close > EMA200?"),
+                        "Trend (Higher H/L)": st.column_config.TextColumn("Trend Check", help="Is Price structure showing Higher Highs & Higher Lows?"),
                         "Volume Check": st.column_config.TextColumn("Vol Check", help="Is daily volume above the 20-day SMA?"),
                         "Weekly Return": st.column_config.TextColumn("Weekly Return", help="Return this week (must be <= 10% to prevent chasing)"),
                         "Status": st.column_config.TextColumn("Final Status"),
@@ -490,9 +468,6 @@ with tab_back:
             start_date="2026-01-01", 
             end_date="2026-04-30", 
             lookback_days=lookback_days,
-            enable_market_filter=st.session_state.enable_market_filter,
-            enable_stock_200_ema=st.session_state.enable_stock_200_ema,
-            min_sl_pct=float(st.session_state.min_sl_pct) / 100.0,
             rr_ratio=float(st.session_state.rr_ratio.split(":")[1])
         )
         

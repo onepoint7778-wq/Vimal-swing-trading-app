@@ -244,35 +244,26 @@ class SwingTradingAgents:
             
             # Use local mapping to avoid slow and rate-limited API calls
             sector = self.stock_sector_map.get(symbol.upper(), "Unknown")
-            
-            # Manual RSI (14)
-            delta = df['Close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-            rs = gain / (loss + 1e-8)
-            df['RSI_14'] = 100 - (100 / (1 + rs))
-            
-            # Manual ATR (14)
-            tr1 = df['High'] - df['Low']
-            tr2 = abs(df['High'] - df['Close'].shift())
-            tr3 = abs(df['Low'] - df['Close'].shift())
-            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-            df['ATRr_14'] = tr.rolling(window=14).mean()
-            
-            # Manual Bollinger Bands (20, 2)
-            sma = df['Close'].rolling(window=20).mean()
-            std = df['Close'].rolling(window=20).std()
-            df['BBU_20_2.0'] = sma + (2 * std)
-            
-            # RichRoad Logic
-            df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
-            df['EMA_200'] = df['Close'].ewm(span=200, adjust=False).mean()
-            df['Turnover_Cr'] = (df['Close'] * df['Volume']) / 10000000
-            
             return df, sector
         except Exception as e:
             self.logs['analyst'] += f" [Error processing stock data for {symbol}: {e}]"
             return None, None
+
+    def is_price_action_uptrend(self, df):
+        if len(df) < 30:
+            return False
+        # Divide last 30 days of data into three 10-day blocks
+        b1 = df.iloc[-30:-20]
+        b2 = df.iloc[-20:-10]
+        b3 = df.iloc[-10:]
+        
+        h2 = b2['High'].max()
+        l2 = b2['Low'].min()
+        h3 = b3['High'].max()
+        l3 = b3['Low'].min()
+        
+        # Rising peaks and troughs (H3 > H2 and L3 > L2)
+        return h3 > h2 and l3 > l2
 
     def run_pipeline(self, lookback_days=5, rr_ratio=2.0):
         self.logs['analyst'] = ""
