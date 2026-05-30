@@ -131,37 +131,48 @@ class SwingTradingAgents:
 
     def fetch_chartink_stocks(self):
         try:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                "Referer": "https://chartink.com/",
+                "Origin": "https://chartink.com",
+                "Accept": "application/json, text/javascript, */*; q=0.01"
+            }
             with requests.Session() as s:
-                r = s.get(self.chartink_url, verify=False, headers={"User-Agent": "Mozilla/5.0"})
+                r = s.get(self.chartink_url, verify=False, headers=headers, timeout=10)
+                if r.status_code != 200:
+                    self.logs['scraper'] = f"Chartink server returned error code {r.status_code}."
+                    return []
+                    
                 soup = BeautifulSoup(r.text, 'html.parser')
                 csrf = soup.select_one('meta[name="csrf-token"]')
                 if not csrf: 
-                    self.logs['scraper'] = "Chartink scan successful (Fallback Mode). Found 5 candidates."
-                    return ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ITC"]
+                    self.logs['scraper'] = "Chartink blocked the request (Could not find CSRF token). Cloudflare challenge active."
+                    return []
                 
                 scan_clause_match = re.search(r"scan_clause\s*=\s*'(.*?)'", r.text)
                 if not scan_clause_match: 
-                    self.logs['scraper'] = "Chartink scan completed. Found 2 fallback candidates."
-                    return ["RELIANCE", "TCS"]
+                    self.logs['scraper'] = "Chartink URL page did not contain the scanning logic query."
+                    return []
                 
                 res = s.post("https://chartink.com/screener/process", data={'scan_clause': scan_clause_match.group(1)}, 
-                             headers={'x-csrf-token': csrf['content'], 'X-Requested-With': 'XMLHttpRequest', 'User-Agent': 'Mozilla/5.0'}, 
-                             verify=False)
-                data = res.json()
-                if 'data' in data:
-                    stocks = [item['nsecode'] for item in data['data']]
-                    self.logs['scraper'] = f"Successfully scanned Chartink. Found {len(stocks)} raw candidates."
-                    return stocks
-                
-                self.logs['scraper'] = "Scan returned 0 candidates."
+                             headers={
+                                 'x-csrf-token': csrf['content'], 
+                                 'X-Requested-With': 'XMLHttpRequest', 
+                                 'User-Agent': headers['User-Agent'],
+                                 'Referer': self.chartink_url
+                             }, 
+                             verify=False, timeout=10)
+                if res.status_code == 200:
+                    data = res.json()
+                    if 'data' in data:
+                        stocks = [item['nsecode'] for item in data['data']]
+                        self.logs['scraper'] = f"Successfully scanned Chartink. Found {len(stocks)} raw candidates."
+                        return stocks
+                self.logs['scraper'] = f"Chartink POST request returned status {res.status_code}."
                 return []
         except Exception as e:
-            self.logs['scraper'] = f"Chartink server blocked request. Fallback: Scanning Nifty Top 20."
-            return [
-                "RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "BHARTIARTL", "INFY", "ITC", 
-                "L&T", "SBIN", "BAJFINANCE", "KOTAKBANK", "AXISBANK", "M&M", "MARUTI",
-                "ASIANPAINT", "SUNPHARMA", "HCLTECH", "TITAN", "NTPC", "TATAMOTORS"
-            ]
+            self.logs['scraper'] = f"Chartink connection failed: {e}"
+            return []
 
     def _calc_rrg(self, asset_series, bench_series):
         df = pd.concat([asset_series, bench_series], axis=1).dropna()
@@ -249,7 +260,7 @@ class SwingTradingAgents:
         # Rising peaks and troughs (H3 > H2 and L3 > L2)
         return h3 > h2 and l3 > l2
 
-    def run_pipeline(self, lookback_days=5, rr_ratio=2.0):
+    def run_pipeline(self, lookback_days=5, rr_ratio=2.0, manual_stocks=None):
         self.logs['analyst'] = ""
         self.logs['risk'] = []
         
@@ -279,7 +290,11 @@ class SwingTradingAgents:
             except:
                 pass
                 
-        stocks = self.fetch_chartink_stocks()
+        if manual_stocks and manual_stocks.strip():
+            stocks = [s.strip().upper() for s in re.split(r'[,\s]+', manual_stocks) if s.strip()]
+            self.logs['scraper'] = f"Using {len(stocks)} manual stock symbols."
+        else:
+            stocks = self.fetch_chartink_stocks()
         pipeline_data = []
         
         for symbol in stocks:

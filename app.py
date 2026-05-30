@@ -27,6 +27,7 @@ def load_config():
         "fyers_token": "",
         "fyers_redirect_uri": "https://vimal-swing-trading-app-st43utvpyng3zswmkaqot2.streamlit.app/",
         "chartink_url": "https://chartink.com/screener/richroad-pivot-points-weekly-scan-2028",
+        "manual_stocks": "",
         "rr_ratio": "1:2"
     }
 
@@ -51,6 +52,8 @@ if "fyers_redirect_uri" not in st.session_state:
     st.session_state.fyers_redirect_uri = config.get("fyers_redirect_uri", "https://vimal-swing-trading-app-st43utvpyng3zswmkaqot2.streamlit.app/")
 if "chartink_url" not in st.session_state:
     st.session_state.chartink_url = config.get("chartink_url", "https://chartink.com/screener/richroad-pivot-points-weekly-scan-2028")
+if "manual_stocks" not in st.session_state:
+    st.session_state.manual_stocks = config.get("manual_stocks", "")
 if "rr_ratio" not in st.session_state:
     st.session_state.rr_ratio = config.get("rr_ratio", "1:2")
 
@@ -121,6 +124,7 @@ with st.sidebar:
     lookback_days = 5 if "1 Week" in timeframe_label else 20
     
     chartink_url = st.text_input("Chartink Scanner URL:", value=st.session_state.chartink_url)
+    manual_stocks = st.text_input("Or Manually Enter Stocks (comma-separated):", value=st.session_state.manual_stocks, help="e.g. TCS, RELIANCE, INFY. Use this to scan specific stocks or if Chartink is blocked.")
     
     st.markdown("#### ⚙️ Controls")
     rr_options = ["1:2", "1:2.5", "1:3"]
@@ -133,6 +137,7 @@ with st.sidebar:
         st.session_state.fyers_redirect_uri = fyers_redirect_uri
         st.session_state.fyers_token = fyers_token
         st.session_state.chartink_url = chartink_url
+        st.session_state.manual_stocks = manual_stocks
         st.session_state.rr_ratio = rr_label
         
         save_config({
@@ -142,6 +147,7 @@ with st.sidebar:
             "fyers_redirect_uri": fyers_redirect_uri,
             "fyers_token": fyers_token,
             "chartink_url": chartink_url,
+            "manual_stocks": manual_stocks,
             "rr_ratio": rr_label
         })
         st.success("Settings saved successfully!")
@@ -167,7 +173,7 @@ st.markdown("""
 st.markdown("<h2 style='color: #1A73E8;'>📊 TradeLogic Dashboard</h2>", unsafe_allow_html=True)
 
 @st.cache_data(ttl=3600)
-def fetch_data(use_fyers, fyers_app_id, fyers_token, lookback, chartink_url, rr_ratio):
+def fetch_data(use_fyers, fyers_app_id, fyers_token, lookback, chartink_url, rr_ratio, manual_stocks):
     agents = SwingTradingAgents(
         use_fyers=use_fyers,
         fyers_app_id=fyers_app_id,
@@ -176,7 +182,8 @@ def fetch_data(use_fyers, fyers_app_id, fyers_token, lookback, chartink_url, rr_
     )
     sector_rrg, stocks_df, dynamic_risk, logs, df_pipeline = agents.run_pipeline(
         lookback_days=lookback,
-        rr_ratio=float(rr_ratio.split(":")[1])
+        rr_ratio=float(rr_ratio.split(":")[1]),
+        manual_stocks=manual_stocks
     )
     return stocks_df, df_pipeline
 
@@ -191,7 +198,8 @@ else:
                 st.session_state.fyers_token,
                 lookback_days,
                 st.session_state.chartink_url,
-                st.session_state.rr_ratio
+                st.session_state.rr_ratio,
+                st.session_state.manual_stocks
             )
         except Exception as e:
             stocks_df, df_pipeline = pd.DataFrame(), pd.DataFrame()
@@ -215,7 +223,10 @@ else:
         st.caption("Real-time filtering pipeline based on Nifty return, Sector return, Price structure, Volume, and Weekly Move checks.")
         
         if df_pipeline is not None and not df_pipeline.empty:
-            st.info(f"📋 **Chartink Scanned Source:** {st.session_state.chartink_url}\n\nFound **{len(df_pipeline)} raw candidates** from the scan. Below is the multi-level filtration report:")
+            if st.session_state.manual_stocks.strip():
+                st.info(f"📋 **Manual Ticker Mode active.** Scanned **{len(df_pipeline)} stocks** from your manual input. Below is the multi-level filtration report:")
+            else:
+                st.info(f"📋 **Chartink Scanned Source:** {st.session_state.chartink_url}\n\nFound **{len(df_pipeline)} raw candidates** from the scan. Below is the multi-level filtration report:")
             st.dataframe(
                 df_pipeline,
                 column_config={
@@ -231,4 +242,8 @@ else:
                 hide_index=True
             )
         else:
-            st.info("No scanning pipeline data generated. Check Fyers API connection or Chartink URL.")
+            if not st.session_state.manual_stocks.strip():
+                st.warning("⚠️ **No Stock Candidates Found:** Either the Chartink URL did not return any stocks (due to Cloudflare blocking the automated connection), or the scanner returned 0 candidates.\n\n"
+                           "👉 **Solution:** Please copy your scanner's stock tickers and paste them into the **Or Manually Enter Stocks** field in the sidebar to scan them instantly.")
+            else:
+                st.warning("⚠️ No stocks were parsed from your manual tickers input. Please verify that the symbols are valid (e.g. RELIANCE, TCS).")
