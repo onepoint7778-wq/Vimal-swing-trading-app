@@ -159,18 +159,25 @@ st.markdown("""
         .stApp { background-color: #F8F9FA; color: #1E1E1E; }
         h1, h2, h3 { color: #000000 !important; font-weight: 700; font-family: 'Inter', sans-serif; }
         h4, h5 { color: #5F6368 !important; font-weight: 600; }
+        
+        .stTabs [data-baseweb="tab-list"] { gap: 24px; border-bottom: 1px solid #EAEAEA; }
+        .stTabs [data-baseweb="tab"] {
+            height: 50px; background-color: transparent; padding: 10px 16px;
+            color: #5F6368; font-weight: 600;
+        }
+        .stTabs [aria-selected="true"] { color: #1A73E8; border-bottom: 3px solid #1A73E8; }
+        
         [data-testid="stVerticalBlockBorderWrapper"] {
-            border-radius: 12px;
-            background-color: #FFFFFF;
+            border-radius: 12px; background-color: #FFFFFF;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
-            border: 1px solid #F1F3F4;
-            padding: 24px;
-            margin-bottom: 15px;
+            border: 1px solid #F1F3F4; padding: 24px; margin-bottom: 15px;
         }
     </style>
 """, unsafe_allow_html=True)
 
 st.markdown("<h2 style='color: #1A73E8;'>📊 TradeLogic Dashboard</h2>", unsafe_allow_html=True)
+
+tab_dash, tab_back = st.tabs(["Dashboard", "Backtest"])
 
 @st.cache_data(ttl=3600)
 def fetch_data(use_fyers, fyers_app_id, fyers_token, lookback, chartink_url, rr_ratio, manual_stocks):
@@ -187,63 +194,138 @@ def fetch_data(use_fyers, fyers_app_id, fyers_token, lookback, chartink_url, rr_
     )
     return stocks_df, df_pipeline
 
-if not st.session_state.fyers_app_id or not st.session_state.fyers_token:
-    st.warning("🔑 **Fyers API Configuration Required:** Please enter your Fyers App ID and log in using the sidebar button to retrieve live market data from Fyers API.")
-else:
-    with st.spinner("🚀 Processing Live Market Data..."):
-        try:
-            stocks_df, df_pipeline = fetch_data(
-                True,
-                st.session_state.fyers_app_id,
-                st.session_state.fyers_token,
-                lookback_days,
-                st.session_state.chartink_url,
-                st.session_state.rr_ratio,
-                st.session_state.manual_stocks
-            )
-        except Exception as e:
-            stocks_df, df_pipeline = pd.DataFrame(), pd.DataFrame()
-            st.error(f"Error fetching data: {e}")
+with tab_dash:
+    if not st.session_state.fyers_app_id or not st.session_state.fyers_token:
+        st.warning("🔑 **Fyers API Configuration Required:** Please enter your Fyers App ID and log in using the sidebar button to retrieve live market data.")
+    else:
+        with st.spinner("🚀 Processing Live Market Data..."):
+            try:
+                stocks_df, df_pipeline = fetch_data(
+                    True,
+                    st.session_state.fyers_app_id,
+                    st.session_state.fyers_token,
+                    lookback_days,
+                    st.session_state.chartink_url,
+                    st.session_state.rr_ratio,
+                    st.session_state.manual_stocks
+                )
+            except Exception as e:
+                stocks_df, df_pipeline = pd.DataFrame(), pd.DataFrame()
+                st.error(f"Error fetching data: {e}")
 
-    # 1. PASSED STOCKS TABLE
-    with st.container(border=True):
-        st.subheader("🎯 Final Filtered Stock List (Momentum Setup Passed)")
-        if stocks_df is not None and not stocks_df.empty:
-            st.dataframe(
-                stocks_df, 
-                use_container_width=True, 
-                hide_index=True
-            )
-        else:
-            st.warning("⚠️ No stocks passed all filtering criteria today.")
+        # 1. PASSED STOCKS TABLE
+        with st.container(border=True):
+            st.subheader("🎯 Final Filtered Stock List (Momentum Setup Passed)")
+            if stocks_df is not None and not stocks_df.empty:
+                st.dataframe(
+                    stocks_df, 
+                    use_container_width=True, 
+                    hide_index=True
+                )
+            else:
+                st.warning("⚠️ No stocks passed all filtering criteria today.")
 
-    # 2. SCANNING PIPELINE REPORT
-    with st.container(border=True):
-        st.subheader("🔍 Complete Stock Scanning Report")
-        st.caption("Real-time filtering pipeline based on Nifty return, Sector return, Price structure, Volume, and Weekly Move checks.")
-        
-        if df_pipeline is not None and not df_pipeline.empty:
-            if st.session_state.manual_stocks.strip():
-                st.info(f"📋 **Manual Ticker Mode active.** Scanned **{len(df_pipeline)} stocks** from your manual input. Below is the multi-level filtration report:")
+        # 2. SCANNING PIPELINE REPORT
+        with st.container(border=True):
+            st.subheader("🔍 Complete Stock Scanning Report")
+            st.caption("Real-time filtering pipeline based on Nifty return, Sector return, Price structure, Volume, and Weekly Move checks.")
+            
+            if df_pipeline is not None and not df_pipeline.empty:
+                if st.session_state.manual_stocks.strip():
+                    st.info(f"📋 **Manual Ticker Mode active.** Scanned **{len(df_pipeline)} stocks** from your manual input. Below is the multi-level filtration report:")
+                else:
+                    st.info(f"📋 **Chartink Scanned Source:** {st.session_state.chartink_url}\n\nFound **{len(df_pipeline)} raw candidates** from the scan. Below is the multi-level filtration report:")
+                st.dataframe(
+                    df_pipeline,
+                    column_config={
+                        "Stock": st.column_config.TextColumn("Stock name"),
+                        "Sector": st.column_config.TextColumn("Sector"),
+                        "Current Price (₹)": st.column_config.TextColumn("Current price"),
+                        "Return vs Nifty": st.column_config.TextColumn("Return vs Nifty"),
+                        "Return vs Sector": st.column_config.TextColumn("Return vs Sector"),
+                        "Status": st.column_config.TextColumn("Status"),
+                        "Reason": st.column_config.TextColumn("Pass/Fail reason")
+                    },
+                    use_container_width=True,
+                    hide_index=True
+                )
             else:
-                st.info(f"📋 **Chartink Scanned Source:** {st.session_state.chartink_url}\n\nFound **{len(df_pipeline)} raw candidates** from the scan. Below is the multi-level filtration report:")
-            st.dataframe(
-                df_pipeline,
-                column_config={
-                    "Stock": st.column_config.TextColumn("Stock name"),
-                    "Sector": st.column_config.TextColumn("Sector"),
-                    "Current Price (₹)": st.column_config.TextColumn("Current price"),
-                    "Return vs Nifty": st.column_config.TextColumn("Return vs Nifty"),
-                    "Return vs Sector": st.column_config.TextColumn("Return vs Sector"),
-                    "Status": st.column_config.TextColumn("Status"),
-                    "Reason": st.column_config.TextColumn("Pass/Fail reason")
-                },
-                use_container_width=True,
-                hide_index=True
+                if not st.session_state.manual_stocks.strip():
+                    st.warning("⚠️ **No Stock Candidates Found:** Either the Chartink URL did not return any stocks (due to Cloudflare blocking the automated connection), or the scanner returned 0 candidates.\n\n"
+                               "👉 **Solution:** Please copy your scanner's stock tickers and paste them into the **Or Manually Enter Stocks** field in the sidebar to scan them instantly.")
+                else:
+                    st.warning("⚠️ No stocks were parsed from your manual tickers input. Please verify that the symbols are valid (e.g. RELIANCE, TCS).")
+
+with tab_back:
+    st.markdown("<div class='dashboard-header'>⏳ Historical Backtester (Jan '26 - Apr '26)</div>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #888;'>FII Institutional Rules: Fast Momentum, Nifty Relative Strength, Target 1:2 RR.</p>", unsafe_allow_html=True)
+    
+    if not st.session_state.fyers_app_id or not st.session_state.fyers_token:
+        st.warning("🔑 **Fyers API Configuration Required:** Please enter your Fyers App ID and log in using the sidebar to run historical backtests.")
+    else:
+        with st.spinner("Crunching historical market data..."):
+            agents = SwingTradingAgents(
+                use_fyers=True,
+                fyers_app_id=st.session_state.fyers_app_id,
+                fyers_token=st.session_state.fyers_token,
+                chartink_url=st.session_state.chartink_url
             )
+            bt_df, metrics = agents.run_backtest(
+                start_date="2026-01-01", 
+                end_date="2026-04-30", 
+                lookback_days=lookback_days,
+                rr_ratio=float(st.session_state.rr_ratio.split(":")[1])
+            )
+            
+        with st.container(border=True):
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Total Trades", metrics["Total Trades"])
+            c2.metric("Win Rate", metrics["Win Rate"])
+            c3.metric("Wins / Losses", f"{metrics['Wins']} / {metrics['Losses']}")
+            c4.metric("Net Profit", metrics["Net Profit"])
+            
+        with st.container(border=True):
+            c5, c6, c7, c8 = st.columns(4)
+            c5.metric("Avg Return per Trade", metrics["Average Return"])
+            c6.metric("Avg Holding Days", metrics["Average Holding Days"])
+            c7.metric("Best Trade Return", metrics["Best Trade"])
+            c8.metric("Worst Trade Return", metrics["Worst Trade"])
+            
+        # --- CAPITAL GROWTH CURVE CHART ---
+        if not bt_df.empty:
+            st.subheader("Capital Growth Curve")
+            cap_curve_data = [{"Date": "2026-01-01", "Capital (₹)": 50000.0}]
+            running_cap = 50000.0
+            for idx, row in bt_df.iterrows():
+                running_cap += float(row["P&L"])
+                cap_curve_data.append({
+                    "Date": row["Exit Date"],
+                    "Capital (₹)": running_cap
+                })
+            df_cap_curve = pd.DataFrame(cap_curve_data)
+            
+            import plotly.express as px
+            fig_cap = px.line(
+                df_cap_curve,
+                x="Date",
+                y="Capital (₹)",
+                title="Capital Growth Curve (Starting: ₹50,000)",
+                markers=True
+            )
+            fig_cap.update_layout(
+                plot_bgcolor='#FFFFFF',
+                paper_bgcolor='#FFFFFF',
+                font=dict(color='#5F6368'),
+                height=350,
+                margin=dict(l=20, r=20, t=40, b=20),
+                xaxis=dict(showgrid=True, gridcolor='#F1F3F4'),
+                yaxis=dict(showgrid=True, gridcolor='#F1F3F4')
+            )
+            st.plotly_chart(fig_cap, use_container_width=True)
+            
+        st.subheader("Trade Log")
+        if not bt_df.empty:
+            display_bt_df = bt_df[["Entry Date", "Exit Date", "Stock", "Entry", "Stop Loss", "Target", "Status", "P&L", "Holding Days", "Return %"]].copy()
+            st.dataframe(display_bt_df, use_container_width=True, hide_index=True)
         else:
-            if not st.session_state.manual_stocks.strip():
-                st.warning("⚠️ **No Stock Candidates Found:** Either the Chartink URL did not return any stocks (due to Cloudflare blocking the automated connection), or the scanner returned 0 candidates.\n\n"
-                           "👉 **Solution:** Please copy your scanner's stock tickers and paste them into the **Or Manually Enter Stocks** field in the sidebar to scan them instantly.")
-            else:
-                st.warning("⚠️ No stocks were parsed from your manual tickers input. Please verify that the symbols are valid (e.g. RELIANCE, TCS).")
+            st.info("No trades executed during backtest range.")
