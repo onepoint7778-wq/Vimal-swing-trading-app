@@ -253,22 +253,20 @@ class SwingTradingAgents:
         self.logs['analyst'] = ""
         self.logs['risk'] = []
         
-        # 1. Run RRG to populate self.sector_dfs & self.sector_rrg
+        # Run sector calculations
         self.analyze_sectors_rrg()
         
-        # Agent 1: Sector Filter
         strong_sectors = []
         all_sectors_data = {}
         
         try:
             if self.benchmark_data is None or len(self.benchmark_data) < lookback_days + 1:
                 raise Exception("Insufficient Nifty 50 benchmark data.")
-            
             nifty_ret = (self.benchmark_data.iloc[-1] / self.benchmark_data.iloc[-1 - lookback_days]) - 1
             self.logs['analyst'] += f"Nifty 50 Return ({lookback_days}d): {nifty_ret*100:.2f}%\n"
         except Exception as e:
+            nifty_ret = 0.0
             self.logs['analyst'] += f"Failed to fetch Nifty 50 benchmark return: {e}\n"
-            return {}, pd.DataFrame(), self.risk_per_trade, self.logs, pd.DataFrame()
             
         for sec_name, sec_df in self.sector_dfs.items():
             if sec_name == 'Nifty 50': continue
@@ -281,167 +279,76 @@ class SwingTradingAgents:
             except:
                 pass
                 
-        self.logs['analyst'] += f"Agent 1 (Sector Filter): Found {len(strong_sectors)} strong sectors: {', '.join(strong_sectors)}\n"
-        
-        # 2. Agent 2: Stock RS Filter & Agent 3: Setup Scanner
         stocks = self.fetch_chartink_stocks()
-        rs_passed_stocks = []
-        final_picks = []
         pipeline_data = []
         
         for symbol in stocks:
             sector = self.stock_sector_map.get(symbol.upper(), "Unknown")
-            sec_strong = "✅ Yes" if sector in strong_sectors else "❌ No"
             
-            # Default pipeline values
-            rs_status = "❌ Failed"
-            trend_status = "❌ Failed"
-            vol_status = "❌ Failed"
-            weekly_return_str = "-"
-            status = "Filtered Out"
-            reason = ""
-            
-            if sector not in strong_sectors:
-                reason = f"Sector '{sector}' is weak"
-                pipeline_data.append({
-                    "Stock": symbol,
-                    "Sector": sector,
-                    "Sector Strong": sec_strong,
-                    "RS Status": rs_status,
-                    "Trend (Higher H/L)": trend_status,
-                    "Volume Check": vol_status,
-                    "Weekly Return": weekly_return_str,
-                    "Status": status,
-                    "Reason": reason
-                })
-                self.logs['risk'].append({
-                    'Stock': symbol,
-                    'Reason': f"Sector '{sector}' is not outperforming Nifty 50."
-                })
-                continue
-                
             try:
                 stock_df = self.get_data_feed(symbol, period='6mo')
                 if stock_df.empty or len(stock_df) < lookback_days + 1:
-                    reason = "No data available"
                     pipeline_data.append({
                         "Stock": symbol,
                         "Sector": sector,
-                        "Sector Strong": sec_strong,
-                        "RS Status": rs_status,
-                        "Trend (Higher H/L)": trend_status,
-                        "Volume Check": vol_status,
-                        "Weekly Return": weekly_return_str,
-                        "Status": status,
-                        "Reason": reason
+                        "Current Price (₹)": "-",
+                        "Return vs Nifty": "-",
+                        "Return vs Sector": "-",
+                        "Status": "Filtered Out",
+                        "Reason": "No data available"
                     })
                     continue
                 
                 stock_close = stock_df['Close']
+                current_price = float(stock_close.iloc[-1])
                 stock_ret = (stock_close.iloc[-1] / stock_close.iloc[-1 - lookback_days]) - 1
-                sector_ret = all_sectors_data.get(sector, -999)
+                sector_ret = all_sectors_data.get(sector, 0.0)
                 
-                # Check relative strength outperformance
-                rs_ok = stock_ret > nifty_ret and stock_ret > sector_ret
-                rs_status = "✅ Pass" if rs_ok else "❌ Failed"
+                ret_vs_nifty = stock_ret - nifty_ret
+                ret_vs_sector = stock_ret - sector_ret
                 
-                if not rs_ok:
-                    reason = f"Weak RS (Stock {stock_ret*100:.1f}%, Sector {sector_ret*100:.1f}%)"
-                    pipeline_data.append({
-                        "Stock": symbol,
-                        "Sector": sector,
-                        "Sector Strong": sec_strong,
-                        "RS Status": rs_status,
-                        "Trend (Higher H/L)": trend_status,
-                        "Volume Check": vol_status,
-                        "Weekly Return": weekly_return_str,
-                        "Status": status,
-                        "Reason": reason
-                    })
-                    self.logs['risk'].append({
-                        'Stock': symbol,
-                        'Reason': f"Stock return ({stock_ret*100:.1f}%) is weaker than Nifty or sector return."
-                    })
-                    continue
-                    
-                rs_passed_stocks.append({
-                    'Stock': symbol,
-                    'Sector': sector,
-                    'Stock Return': stock_ret,
-                    'Sector Return': sector_ret
-                })
+                # Check conditions sequentially
+                reasons = []
                 
-                # Agent 3: Setup Scanner
+                # 1. Sector Strength Check
+                if sector not in strong_sectors:
+                    reasons.append(f"Sector '{sector}' is weaker than Nifty 50")
+                
+                # 2. RS checks
+                if stock_ret <= nifty_ret:
+                    reasons.append(f"Stock return ({stock_ret*100:.1f}%) is below Nifty ({nifty_ret*100:.1f}%)")
+                if stock_ret <= sector_ret:
+                    reasons.append(f"Stock return ({stock_ret*100:.1f}%) is below Sector ({sector_ret*100:.1f}%)")
+                
+                # 3. Uptrend Check (Price Action)
+                is_uptrend = self.is_price_action_uptrend(stock_df)
+                if not is_uptrend:
+                    reasons.append("Not in Price Action Uptrend (Higher Highs & Higher Lows)")
+                
+                # 4. Volume Check
                 stock_df['Vol_SMA_20'] = stock_df['Volume'].rolling(20).mean()
                 latest = stock_df.iloc[-1]
-                
-                # Trend condition: Pure Price Action Swing Structure
-                is_uptrend = self.is_price_action_uptrend(stock_df)
-                trend_status = "✅ Pass" if is_uptrend else "❌ Failed"
-                
-                # Anti-chasing logic (max 10% move this week)
+                if latest['Volume'] <= latest['Vol_SMA_20']:
+                    reasons.append(f"Volume ({latest['Volume']/1e6:.1f}M) below 20-day average")
+                    
+                # 5. Anti-chasing logic (weekly move <= 10%)
                 weekly_ret = (stock_close.iloc[-1] / stock_close.iloc[-5]) - 1
-                weekly_return_str = f"{weekly_ret*100:+.1f}%"
-                chase_ok = weekly_ret <= 0.10
+                if weekly_ret > 0.10:
+                    reasons.append(f"Weekly return ({weekly_ret*100:.1f}%) exceeds 10%")
                 
-                # Volume check
-                vol_ok = latest['Volume'] > latest['Vol_SMA_20']
-                vol_status = "✅ Pass" if vol_ok else "❌ Failed"
-                
-                if not is_uptrend:
-                    reason = "Price Action not in Higher High / Higher Low uptrend"
-                    self.logs['risk'].append({
-                        'Stock': symbol,
-                        'Reason': f"Stock price structure does not show Higher Highs and Higher Lows over last 30 days."
-                    })
-                elif not chase_ok:
-                    reason = f"Weekly return ({weekly_ret*100:.1f}%) exceeds limit of 10%"
-                    self.logs['risk'].append({
-                        'Stock': symbol,
-                        'Reason': f"Stock weekly return ({weekly_ret*100:.1f}%) exceeds limit of 10% (Chasing)."
-                    })
-                elif not vol_ok:
-                    reason = f"Volume ({latest['Volume']/1e6:.1f}M) below 20-day average ({latest['Vol_SMA_20']/1e6:.1f}M)"
-                    self.logs['risk'].append({
-                        'Stock': symbol,
-                        'Reason': f"Volume ({latest['Volume']/1e6:.1f}M) below 20-day average ({latest['Vol_SMA_20']/1e6:.1f}M)."
-                    })
-                else:
+                if len(reasons) == 0:
                     status = "Passed"
-                    reason = "Setup confirmed"
+                    reason = "Setup Confirmed"
+                else:
+                    status = "Filtered Out"
+                    reason = ", ".join(reasons)
                     
-                    entry = float(latest['Close'])
-                    swing_low = float(stock_df['Low'].iloc[-5:].min())
-                    sl = swing_low
-                    
-                    # Structure based stop-loss (no fixed percentage bounds!)
-                    if sl >= entry:
-                        sl = entry * 0.99
-                        
-                    risk = entry - sl
-                    target = entry + (rr_ratio * risk)
-                    qty = math.floor(self.max_allocation / entry)
-                    
-                    if qty > 0:
-                        final_picks.append({
-                            'Stock': symbol,
-                            'Sector': sector,
-                            'Entry (₹)': round(entry, 2),
-                            'Stop Loss (₹)': round(sl, 2),
-                            'Target (₹)': round(target, 2),
-                            'Quantity': qty,
-                            'Max Risk (₹)': round(qty * risk, 2),
-                            'Remark': f"🚀 Setup Confirmed: Strong RS & Vol ({sector})"
-                        })
-                
                 pipeline_data.append({
                     "Stock": symbol,
                     "Sector": sector,
-                    "Sector Strong": sec_strong,
-                    "RS Status": rs_status,
-                    "Trend (Higher H/L)": trend_status,
-                    "Volume Check": vol_status,
-                    "Weekly Return": weekly_return_str,
+                    "Current Price (₹)": f"₹{current_price:,.2f}",
+                    "Return vs Nifty": f"{ret_vs_nifty*100:+.2f}%",
+                    "Return vs Sector": f"{ret_vs_sector*100:+.2f}%",
                     "Status": status,
                     "Reason": reason
                 })
@@ -449,26 +356,21 @@ class SwingTradingAgents:
                 pipeline_data.append({
                     "Stock": symbol,
                     "Sector": sector,
-                    "Sector Strong": sec_strong,
-                    "RS Status": "❌ Error",
-                    "Trend (Higher H/L)": "❌ Error",
-                    "Volume Check": "❌ Error",
-                    "Weekly Return": "-",
-                    "Status": "Error",
+                    "Current Price (₹)": "-",
+                    "Return vs Nifty": "-",
+                    "Return vs Sector": "-",
+                    "Status": "Filtered Out",
                     "Reason": str(e)
                 })
-                self.logs['risk'].append({
-                    'Stock': symbol,
-                    'Reason': f"Processing error: {e}"
-                })
                 
-        df_final = pd.DataFrame(final_picks)
-        if not df_final.empty:
-            df_final = df_final.head(2) # Filter to top 2 stocks
-            
-        self.logs['analyst'] += f"Agent 2 (Stock Filter): Filtered {len(rs_passed_stocks)} stocks outperforming sector. Agent 3 (Setup Scanner): Final selection contains {len(df_final)} stocks."
+        df_pipeline = pd.DataFrame(pipeline_data)
         
-        return self.sector_rrg, df_final, self.risk_per_trade, self.logs, pd.DataFrame(pipeline_data)
+        # Filter final picks
+        df_final = df_pipeline[df_pipeline["Status"] == "Passed"].copy()
+        if not df_final.empty:
+            df_final = df_final[["Stock", "Sector", "Current Price (₹)", "Return vs Nifty", "Return vs Sector"]]
+            
+        return self.sector_rrg, df_final, self.risk_per_trade, self.logs, df_pipeline
 
     def run_backtest(self, start_date="2026-01-01", end_date="2026-04-30", lookback_days=5, rr_ratio=2.0):
         from datetime import datetime, timedelta
@@ -574,9 +476,9 @@ class SwingTradingAgents:
                     daily_data = df.loc[current_date]
                     if daily_data['Close'] > daily_data['Open']: # Strong candle check
                         entry_price = float(daily_data['Close'])
-                        # Structure based swing low from 5-day low prior to this entry day
+                        # Structure based swing low from 10-day low prior to this entry day
                         stock_slice = df.loc[:current_date]
-                        sl = float(stock_slice['Low'].iloc[-5:].min())
+                        sl = float(stock_slice['Low'].iloc[:-1].iloc[-10:].min())
                         if sl >= entry_price:
                             sl = entry_price * 0.99
                         risk = entry_price - sl
