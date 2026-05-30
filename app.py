@@ -115,14 +115,8 @@ if auth_code:
 
 # --- STREAMLIT SIDEBAR SETTINGS ---
 with st.sidebar:
-    st.markdown("### 🔌 Market Data Settings")
-    provider = st.radio(
-        "Select Data Feed Source:",
-        ["yfinance (Free, Rate-Limited)", "Fyers API (Safe & Fast)"],
-        index=1 if st.session_state.use_fyers else 0
-    )
-    
-    use_fyers = (provider == "Fyers API (Safe & Fast)")
+    st.markdown("### 🔌 Fyers API Settings")
+    use_fyers = True
     fyers_app_id = st.text_input("Fyers App ID (Client ID):", value=st.session_state.fyers_app_id)
     fyers_secret_key = st.text_input("Fyers Secret Key:", value=st.session_state.fyers_secret_key, type="password")
     fyers_redirect_uri = st.text_input("Redirect URI (Registered in Fyers App):", value=st.session_state.fyers_redirect_uri)
@@ -151,7 +145,7 @@ with st.sidebar:
     rr_label = st.selectbox("Risk-Reward Ratio:", rr_options, index=default_idx)
     
     if st.button("💾 Save & Apply Settings"):
-        st.session_state.use_fyers = use_fyers
+        st.session_state.use_fyers = True
         st.session_state.fyers_app_id = fyers_app_id
         st.session_state.fyers_secret_key = fyers_secret_key
         st.session_state.fyers_redirect_uri = fyers_redirect_uri
@@ -160,7 +154,7 @@ with st.sidebar:
         st.session_state.rr_ratio = rr_label
         
         save_config({
-            "use_fyers": use_fyers,
+            "use_fyers": True,
             "fyers_app_id": fyers_app_id,
             "fyers_secret_key": fyers_secret_key,
             "fyers_redirect_uri": fyers_redirect_uri,
@@ -275,24 +269,26 @@ with tab_dash:
             )
             return sector_rrg, stocks_df, dynamic_risk, logs, df_pipeline
 
-        with st.spinner(f"🚀 Processing Live Market Data..."):
-            sector_rrg, stocks_df, dynamic_risk, logs, df_pipeline = fetch_data(
-                current_capital,
-                st.session_state.use_fyers,
-                st.session_state.fyers_app_id,
-                st.session_state.fyers_token,
-                lookback_days,
-                st.session_state.chartink_url,
-                st.session_state.rr_ratio
-            )
+        if not st.session_state.fyers_app_id or not st.session_state.fyers_token:
+            st.warning("🔑 **Fyers API Configuration Required:** Please enter your Fyers App ID and log in using the sidebar button to retrieve live market data.")
+            sector_rrg, stocks_df, dynamic_risk, logs, df_pipeline = {}, pd.DataFrame(), 1000.0, {'scraper': "", 'analyst': "Fyers API not configured.", 'risk': []}, pd.DataFrame()
+        else:
+            with st.spinner(f"🚀 Processing Live Market Data..."):
+                sector_rrg, stocks_df, dynamic_risk, logs, df_pipeline = fetch_data(
+                    current_capital,
+                    True,
+                    st.session_state.fyers_app_id,
+                    st.session_state.fyers_token,
+                    lookback_days,
+                    st.session_state.chartink_url,
+                    st.session_state.rr_ratio
+                )
 
-        # Check if fetch failed (usually due to rate limits or invalid credentials)
-        if df_pipeline is None or df_pipeline.empty:
-            st.error("⚠️ **Market Data Connection Error:** Unable to fetch Nifty 50 index data or sector data.\n\n"
-                     "* **If using yfinance:** Streamlit Cloud servers are frequently blocked by Yahoo Finance due to rate limits. "
-                     "Please switch to **Fyers API** in the sidebar settings for a guaranteed stable and fast data feed.\n"
-                     "* **If using Fyers API:** Please make sure you have entered the correct Fyers App ID, Secret Key, and Redirect URI, "
-                     "clicked 'Save Settings', and then successfully logged in via the 'Log In & Generate Access Token' button.")
+            # Check if fetch failed (usually due to invalid credentials)
+            if df_pipeline is None or df_pipeline.empty:
+                st.error("⚠️ **Fyers API Error:** Unable to fetch Nifty 50 index data or sector data.\n\n"
+                         "Please make sure your Fyers Access Token is valid and has not expired. "
+                         "If it has expired, click the **Log In & Generate Access Token** button in the sidebar to re-authenticate.")
 
         # 1. TOP 2 STOCKS TABLE
         with st.container(border=True):
@@ -457,64 +453,67 @@ with tab_back:
     st.markdown("<div class='dashboard-header'>⏳ Historical Backtester (Jan '26 - Apr '26)</div>", unsafe_allow_html=True)
     st.markdown("<p style='color: #888;'>FII Institutional Rules: Fast Momentum, Nifty Relative Strength, Silent Accumulation (Low Vol), Target 1:2 RR.</p>", unsafe_allow_html=True)
     
-    with st.spinner("Crunching historical market data..."):
-        agents = SwingTradingAgents(
-            use_fyers=st.session_state.use_fyers,
-            fyers_app_id=st.session_state.fyers_app_id,
-            fyers_token=st.session_state.fyers_token,
-            chartink_url=st.session_state.chartink_url
-        )
-        bt_df, metrics = agents.run_backtest(
-            start_date="2026-01-01", 
-            end_date="2026-04-30", 
-            lookback_days=lookback_days,
-            rr_ratio=float(st.session_state.rr_ratio.split(":")[1])
-        )
-        
-    with st.container(border=True):
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total Trades", metrics["Total Trades"])
-        c2.metric("Win Rate", metrics["Win Rate"])
-        c3.metric("Wins / Losses", f"{metrics['Wins']} / {metrics['Losses']}")
-        c4.metric("Net Profit", metrics["Net Profit"])
-        
-    with st.container(border=True):
-        c5, c6, c7, c8 = st.columns(4)
-        c5.metric("Avg Return per Trade", metrics["Average Return"])
-        c6.metric("Avg Holding Days", metrics["Average Holding Days"])
-        c7.metric("Best Trade Return", metrics["Best Trade"])
-        c8.metric("Worst Trade Return", metrics["Worst Trade"])
-        
-    # --- CAPITAL GROWTH CURVE CHART ---
-    if not bt_df.empty:
-        with st.container(border=True):
-            cap_curve_data = [{"Date": "2026-01-01", "Capital (₹)": 50000.0}]
-            running_cap = 50000.0
-            for idx, row in bt_df.iterrows():
-                running_cap += float(row["P&L"])
-                cap_curve_data.append({
-                    "Date": row["Exit Date"],
-                    "Capital (₹)": running_cap
-                })
-            df_cap_curve = pd.DataFrame(cap_curve_data)
+    if not st.session_state.fyers_app_id or not st.session_state.fyers_token:
+        st.warning("🔑 **Fyers API Configuration Required:** Please enter your Fyers App ID and log in using the sidebar to run historical backtests.")
+    else:
+        with st.spinner("Crunching historical market data..."):
+            agents = SwingTradingAgents(
+                use_fyers=True,
+                fyers_app_id=st.session_state.fyers_app_id,
+                fyers_token=st.session_state.fyers_token,
+                chartink_url=st.session_state.chartink_url
+            )
+            bt_df, metrics = agents.run_backtest(
+                start_date="2026-01-01", 
+                end_date="2026-04-30", 
+                lookback_days=lookback_days,
+                rr_ratio=float(st.session_state.rr_ratio.split(":")[1])
+            )
             
-            fig_cap = px.line(
-                df_cap_curve,
-                x="Date",
-                y="Capital (₹)",
-                title="Capital Growth Curve (Starting: ₹50,000)",
-                markers=True
-            )
-            fig_cap.update_layout(
-                plot_bgcolor='#FFFFFF',
-                paper_bgcolor='#FFFFFF',
-                font=dict(color='#5F6368'),
-                height=350,
-                margin=dict(l=20, r=20, t=40, b=20),
-                xaxis=dict(showgrid=True, gridcolor='#F1F3F4'),
-                yaxis=dict(showgrid=True, gridcolor='#F1F3F4')
-            )
-            st.plotly_chart(fig_cap, use_container_width=True)
-        
-    st.subheader("Trade Log")
-    st.dataframe(bt_df, use_container_width=True, hide_index=True)
+        with st.container(border=True):
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Total Trades", metrics["Total Trades"])
+            c2.metric("Win Rate", metrics["Win Rate"])
+            c3.metric("Wins / Losses", f"{metrics['Wins']} / {metrics['Losses']}")
+            c4.metric("Net Profit", metrics["Net Profit"])
+            
+        with st.container(border=True):
+            c5, c6, c7, c8 = st.columns(4)
+            c5.metric("Avg Return per Trade", metrics["Average Return"])
+            c6.metric("Avg Holding Days", metrics["Average Holding Days"])
+            c7.metric("Best Trade Return", metrics["Best Trade"])
+            c8.metric("Worst Trade Return", metrics["Worst Trade"])
+            
+        # --- CAPITAL GROWTH CURVE CHART ---
+        if not bt_df.empty:
+            with st.container(border=True):
+                cap_curve_data = [{"Date": "2026-01-01", "Capital (₹)": 50000.0}]
+                running_cap = 50000.0
+                for idx, row in bt_df.iterrows():
+                    running_cap += float(row["P&L"])
+                    cap_curve_data.append({
+                        "Date": row["Exit Date"],
+                        "Capital (₹)": running_cap
+                    })
+                df_cap_curve = pd.DataFrame(cap_curve_data)
+                
+                fig_cap = px.line(
+                    df_cap_curve,
+                    x="Date",
+                    y="Capital (₹)",
+                    title="Capital Growth Curve (Starting: ₹50,000)",
+                    markers=True
+                )
+                fig_cap.update_layout(
+                    plot_bgcolor='#FFFFFF',
+                    paper_bgcolor='#FFFFFF',
+                    font=dict(color='#5F6368'),
+                    height=350,
+                    margin=dict(l=20, r=20, t=40, b=20),
+                    xaxis=dict(showgrid=True, gridcolor='#F1F3F4'),
+                    yaxis=dict(showgrid=True, gridcolor='#F1F3F4')
+                )
+                st.plotly_chart(fig_cap, use_container_width=True)
+            
+        st.subheader("Trade Log")
+        st.dataframe(bt_df, use_container_width=True, hide_index=True)

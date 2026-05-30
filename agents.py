@@ -1,4 +1,4 @@
-import yfinance as yf
+
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
@@ -121,27 +121,11 @@ class SwingTradingAgents:
             from_date = fd_dt.strftime("%Y-%m-%d")
             to_date = to_dt.strftime("%Y-%m-%d")
             
-        if self.use_fyers and self.fyers_app_id and self.fyers_token:
+        if self.fyers_app_id and self.fyers_token:
             df = self.fetch_fyers_historical(symbol, from_date, to_date)
             if df is not None and not df.empty:
                 return df
-            self.logs['analyst'] += f" [Fyers feed failed for {symbol}, falling back to yfinance]"
-            
-        ticker = symbol if symbol.startswith("^") else f"{symbol}.NS"
-        try:
-            session = requests.Session()
-            session.headers.update({
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            })
-            stock_obj = yf.Ticker(ticker, session=session)
-            df = stock_obj.history(start=from_date, end=to_date)
-            if not df.empty:
-                if df.index.tz is not None:
-                    df.index = df.index.tz_localize(None)
-                df = df[["Open", "High", "Low", "Close", "Volume"]]
-                return df
-        except Exception as e:
-            self.logs['analyst'] += f" [yfinance fallback failed for {ticker}: {e}]"
+            self.logs['analyst'] += f" [Fyers feed failed for {symbol}]"
             
         return pd.DataFrame()
 
