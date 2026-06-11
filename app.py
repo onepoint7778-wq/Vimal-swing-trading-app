@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 from agents import SwingTradingAgents
 from datetime import datetime
 import time
@@ -8,9 +10,8 @@ import os
 import hashlib
 import requests
 
-st.set_page_config(page_title="TradeLogic Dashboard", page_icon="📊", layout="wide")
+st.set_page_config(page_title="GTF Eye Dashboard", page_icon="📊", layout="wide")
 
-# --- PERSISTENT CONFIGURATION STORAGE ---
 CONFIG_FILE = "config.json"
 
 def load_config():
@@ -21,12 +22,11 @@ def load_config():
         except:
             pass
     return {
-        "use_fyers": True,
         "fyers_app_id": "",
         "fyers_secret_key": "",
         "fyers_token": "",
         "fyers_redirect_uri": "https://vimal-swing-trading-app-st43utvpyng3zswmkaqot2.streamlit.app/",
-        "chartink_url": "https://chartink.com/screener/richroad-pivot-points-weekly-scan-2028",
+        "chartink_url": "",
         "manual_stocks": "",
         "rr_ratio": "1:2"
     }
@@ -38,46 +38,29 @@ def save_config(config_data):
     except:
         pass
 
-# Initialize session state from stored config
 config = load_config()
-if "use_fyers" not in st.session_state:
-    st.session_state.use_fyers = True
-if "fyers_app_id" not in st.session_state:
-    st.session_state.fyers_app_id = config.get("fyers_app_id", "")
-if "fyers_secret_key" not in st.session_state:
-    st.session_state.fyers_secret_key = config.get("fyers_secret_key", "")
-if "fyers_token" not in st.session_state:
-    st.session_state.fyers_token = config.get("fyers_token", "")
-if "fyers_redirect_uri" not in st.session_state:
-    st.session_state.fyers_redirect_uri = config.get("fyers_redirect_uri", "https://vimal-swing-trading-app-st43utvpyng3zswmkaqot2.streamlit.app/")
-if "chartink_url" not in st.session_state:
-    st.session_state.chartink_url = config.get("chartink_url", "https://chartink.com/screener/richroad-pivot-points-weekly-scan-2028")
-if "manual_stocks" not in st.session_state:
-    st.session_state.manual_stocks = config.get("manual_stocks", "")
-if "rr_ratio" not in st.session_state:
-    st.session_state.rr_ratio = config.get("rr_ratio", "1:2")
 
-# --- AUTOMATIC FYERS AUTH CODE DETECTION ---
+for key, default in {
+    "fyers_app_id": "", "fyers_secret_key": "", "fyers_token": "",
+    "fyers_redirect_uri": "https://vimal-swing-trading-app-st43utvpyng3zswmkaqot2.streamlit.app/",
+    "chartink_url": "", "manual_stocks": "", "rr_ratio": "1:2"
+}.items():
+    if key not in st.session_state:
+        st.session_state[key] = config.get(key, default)
+
+# Auto Fyers auth code detection
 auth_code = st.query_params.get("auth_code")
 if auth_code:
     app_id = config.get("fyers_app_id", "")
     secret_key = config.get("fyers_secret_key", "")
-    
     if app_id and secret_key:
-        with st.spinner("🔑 Validating Fyers Auth Code & Generating Token..."):
+        with st.spinner("🔑 Generating Fyers Access Token..."):
             try:
                 hash_input = f"{app_id}:{secret_key}"
                 app_id_hash = hashlib.sha256(hash_input.encode()).hexdigest()
-                
                 val_url = "https://api-t1.fyers.in/api/v3/validate-authcode"
-                payload = {
-                    "grant_type": "authorization_code",
-                    "appIdHash": app_id_hash,
-                    "code": auth_code
-                }
-                headers = {"Content-Type": "application/json"}
-                
-                res = requests.post(val_url, json=payload, headers=headers)
+                payload = {"grant_type": "authorization_code", "appIdHash": app_id_hash, "code": auth_code}
+                res = requests.post(val_url, json=payload, headers={"Content-Type": "application/json"})
                 if res.status_code == 200:
                     res_data = res.json()
                     if res_data.get("s") == "ok" and "access_token" in res_data:
@@ -85,104 +68,70 @@ if auth_code:
                         st.session_state.fyers_token = token
                         config["fyers_token"] = token
                         save_config(config)
-                        st.success("🎉 Successfully authenticated with Fyers API!")
+                        st.success("✅ Fyers login successful! Token saved.")
                         st.balloons()
                         time.sleep(2)
                     else:
-                        st.error(f"Fyers Auth Failed: {res_data.get('message', 'Unknown error')}")
+                        st.error(f"Auth failed: {res_data.get('message', 'Unknown error')}")
                 else:
-                    st.error(f"Fyers Server Error (HTTP {res.status_code}): {res.text}")
+                    st.error(f"Server error {res.status_code}")
             except Exception as e:
-                st.error(f"Error during authentication: {e}")
-            
-            st.query_params.clear()
-    else:
-        st.warning("⚠️ Auth code received, but App ID or Secret Key was not configured/saved.")
-        st.query_params.clear()
+                st.error(f"Error: {e}")
+    st.query_params.clear()
 
-# --- STREAMLIT SIDEBAR SETTINGS ---
+# Sidebar
 with st.sidebar:
-    st.markdown("### 🔌 Fyers API Settings")
-    fyers_app_id = st.text_input("Fyers App ID (Client ID):", value=st.session_state.fyers_app_id)
-    fyers_secret_key = st.text_input("Fyers Secret Key:", value=st.session_state.fyers_secret_key, type="password")
-    fyers_redirect_uri = st.text_input("Redirect URI (Registered in Fyers App):", value=st.session_state.fyers_redirect_uri)
-    fyers_token = st.text_input("Fyers Access Token (Auto-generated or Manual):", value=st.session_state.fyers_token, type="password")
-    
+    st.markdown("## ⚙️ Settings")
+    st.markdown("### 🔌 Fyers API")
+    fyers_app_id = st.text_input("App ID (Client ID):", value=st.session_state.fyers_app_id)
+    fyers_secret_key = st.text_input("Secret Key:", value=st.session_state.fyers_secret_key, type="password")
+    fyers_redirect_uri = st.text_input("Redirect URI:", value=st.session_state.fyers_redirect_uri)
+    fyers_token = st.text_input("Access Token:", value=st.session_state.fyers_token, type="password")
+
     if fyers_app_id and fyers_secret_key and fyers_redirect_uri:
         login_url = f"https://api-t1.fyers.in/api/v3/generate-authcode?client_id={fyers_app_id}&redirect_uri={fyers_redirect_uri}&response_type=code&state=sample_state"
-        st.markdown(f'<a href="{login_url}" target="_blank" style="text-decoration:none;"><button style="width:100%; border:none; background-color:#1A73E8; color:white; padding:10px; border-radius:6px; cursor:pointer; font-weight:bold; margin-bottom:10px;">🔑 Log In & Generate Access Token</button></a>', unsafe_allow_html=True)
-        st.caption("💡 Steps: (1) Save Settings first, (2) Click button above to login & authorize, (3) It will redirect back and set token.")
-    else:
-        st.info("ℹ️ Enter App ID, Secret Key, and Redirect URI, then Save to enable Fyers auto-login.")
-        
-    st.markdown("### 📊 Strategy Settings")
-    timeframe_label = st.selectbox(
-        "Select Strength Lookback Timeframe:",
-        ["1 Week (5 Trading Days)", "1 Month (20 Trading Days)"],
-        index=0
-    )
+        st.markdown(f'<a href="{login_url}" target="_blank"><button style="width:100%;background:#1A73E8;color:white;padding:10px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;margin:8px 0">🔑 Login & Get Token</button></a>', unsafe_allow_html=True)
+        st.caption("Steps: 1) Save Settings → 2) Click Login → 3) Token auto-sets")
+
+    st.markdown("### 📊 Scan Settings")
+    timeframe_label = st.selectbox("Lookback Timeframe:", ["1 Week (5 Days)", "1 Month (20 Days)"], index=0)
     lookback_days = 5 if "1 Week" in timeframe_label else 20
-    
-    chartink_url = st.text_input("Chartink Scanner URL:", value=st.session_state.chartink_url)
-    manual_stocks = st.text_input("Or Manually Enter Stocks (comma-separated):", value=st.session_state.manual_stocks, help="e.g. TCS, RELIANCE, INFY. Use this to scan specific stocks or if Chartink is blocked.")
-    
-    st.markdown("#### ⚙️ Controls")
+    chartink_url = st.text_input("Chartink Scanner URL (optional):", value=st.session_state.chartink_url)
+    manual_stocks = st.text_area("Manual Stocks (comma separated):", value=st.session_state.manual_stocks,
+                                  help="e.g. RELIANCE, TCS, HDFCBANK", height=100)
     rr_options = ["1:2", "1:2.5", "1:3"]
-    default_idx = rr_options.index(st.session_state.rr_ratio) if st.session_state.rr_ratio in rr_options else 0
-    rr_label = st.selectbox("Risk-Reward Ratio:", rr_options, index=default_idx)
-    
-    if st.button("💾 Save & Apply Settings"):
-        st.session_state.fyers_app_id = fyers_app_id
-        st.session_state.fyers_secret_key = fyers_secret_key
-        st.session_state.fyers_redirect_uri = fyers_redirect_uri
-        st.session_state.fyers_token = fyers_token
-        st.session_state.chartink_url = chartink_url
-        st.session_state.manual_stocks = manual_stocks
-        st.session_state.rr_ratio = rr_label
-        
-        save_config({
-            "use_fyers": True,
-            "fyers_app_id": fyers_app_id,
-            "fyers_secret_key": fyers_secret_key,
-            "fyers_redirect_uri": fyers_redirect_uri,
-            "fyers_token": fyers_token,
-            "chartink_url": chartink_url,
-            "manual_stocks": manual_stocks,
-            "rr_ratio": rr_label
-        })
-        st.success("Settings saved successfully!")
+    rr_label = st.selectbox("Risk-Reward Ratio:", rr_options,
+                             index=rr_options.index(st.session_state.rr_ratio) if st.session_state.rr_ratio in rr_options else 0)
+
+    if st.button("💾 Save Settings", use_container_width=True):
+        for k, v in {"fyers_app_id": fyers_app_id, "fyers_secret_key": fyers_secret_key,
+                     "fyers_redirect_uri": fyers_redirect_uri, "fyers_token": fyers_token,
+                     "chartink_url": chartink_url, "manual_stocks": manual_stocks, "rr_ratio": rr_label}.items():
+            st.session_state[k] = v
+        save_config({"fyers_app_id": fyers_app_id, "fyers_secret_key": fyers_secret_key,
+                     "fyers_redirect_uri": fyers_redirect_uri, "fyers_token": fyers_token,
+                     "chartink_url": chartink_url, "manual_stocks": manual_stocks, "rr_ratio": rr_label})
+        st.success("✅ Saved!")
         st.rerun()
 
-# --- TRADELOGIC UI THEME ---
+# App Styling
 st.markdown("""
-    <style>
-        .stApp { background-color: #F8F9FA; color: #1E1E1E; }
-        h1, h2, h3 { color: #000000 !important; font-weight: 700; font-family: 'Inter', sans-serif; }
-        h4, h5 { color: #5F6368 !important; font-weight: 600; }
-        
-        .stTabs [data-baseweb="tab-list"] { gap: 24px; border-bottom: 1px solid #EAEAEA; }
-        .stTabs [data-baseweb="tab"] {
-            height: 50px; background-color: transparent; padding: 10px 16px;
-            color: #5F6368; font-weight: 600;
-        }
-        .stTabs [aria-selected="true"] { color: #1A73E8; border-bottom: 3px solid #1A73E8; }
-        
-        [data-testid="stVerticalBlockBorderWrapper"] {
-            border-radius: 12px; background-color: #FFFFFF;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
-            border: 1px solid #F1F3F4; padding: 24px; margin-bottom: 15px;
-        }
-    </style>
+<style>
+.stApp { background-color: #F0F2F6; }
+h1, h2, h3 { color: #1A1A2E !important; font-weight: 700; }
+.stTabs [data-baseweb="tab"] { font-weight: 600; font-size: 15px; }
+.stTabs [aria-selected="true"] { color: #1A73E8; border-bottom: 3px solid #1A73E8; }
+</style>
 """, unsafe_allow_html=True)
 
-st.markdown("<h2 style='color: #1A73E8;'>📊 TradeLogic Dashboard</h2>", unsafe_allow_html=True)
+st.markdown("<h2 style='color:#1A73E8;'>📊 GTF Eye — Swing Trading Dashboard</h2>", unsafe_allow_html=True)
 
-tab_dash, tab_back = st.tabs(["Dashboard", "Backtest"])
+tab_dash, tab_rrg, tab_back = st.tabs(["🎯 Stock Scanner", "📈 Sector RRG", "⏳ Backtest"])
 
 @st.cache_data(ttl=3600)
-def fetch_data(use_fyers, fyers_app_id, fyers_token, lookback, chartink_url, rr_ratio, manual_stocks):
+def fetch_data(fyers_app_id, fyers_token, lookback, chartink_url, rr_ratio, manual_stocks):
     agents = SwingTradingAgents(
-        use_fyers=use_fyers,
+        use_fyers=True,
         fyers_app_id=fyers_app_id,
         fyers_token=fyers_token,
         chartink_url=chartink_url
@@ -192,16 +141,16 @@ def fetch_data(use_fyers, fyers_app_id, fyers_token, lookback, chartink_url, rr_
         rr_ratio=float(rr_ratio.split(":")[1]),
         manual_stocks=manual_stocks
     )
-    return stocks_df, df_pipeline
+    return sector_rrg, stocks_df, df_pipeline, logs
 
+# ============ TAB 1: STOCK SCANNER ============
 with tab_dash:
     if not st.session_state.fyers_app_id or not st.session_state.fyers_token:
-        st.warning("🔑 **Fyers API Configuration Required:** Please enter your Fyers App ID and log in using the sidebar button to retrieve live market data.")
+        st.warning("🔑 Please enter Fyers App ID and Token in sidebar, then Save Settings.")
     else:
-        with st.spinner("🚀 Processing Live Market Data..."):
+        with st.spinner("🚀 Fetching market data & scanning stocks..."):
             try:
-                stocks_df, df_pipeline = fetch_data(
-                    True,
+                sector_rrg, stocks_df, df_pipeline, logs = fetch_data(
                     st.session_state.fyers_app_id,
                     st.session_state.fyers_token,
                     lookback_days,
@@ -210,122 +159,202 @@ with tab_dash:
                     st.session_state.manual_stocks
                 )
             except Exception as e:
-                stocks_df, df_pipeline = pd.DataFrame(), pd.DataFrame()
-                st.error(f"Error fetching data: {e}")
+                sector_rrg, stocks_df, df_pipeline, logs = {}, pd.DataFrame(), pd.DataFrame(), {}
+                st.error(f"Error: {e}")
 
-        # 1. PASSED STOCKS TABLE
+        # Passed Stocks
         with st.container(border=True):
-            st.subheader("🎯 Final Filtered Stock List (Momentum Setup Passed)")
+            st.subheader("🎯 Stocks Passing All Filters")
             if stocks_df is not None and not stocks_df.empty:
-                st.dataframe(
-                    stocks_df, 
-                    use_container_width=True, 
-                    hide_index=True
-                )
+                st.success(f"✅ {len(stocks_df)} stocks passed all 7 rules!")
+                st.dataframe(stocks_df, use_container_width=True, hide_index=True)
             else:
-                st.warning("⚠️ No stocks passed all filtering criteria today.")
+                st.warning("⚠️ No stocks passed all filters today. Check pipeline below for details.")
 
-        # 2. SCANNING PIPELINE REPORT
+        # Pipeline Report
         with st.container(border=True):
-            st.subheader("🔍 Complete Stock Scanning Report")
-            st.caption("Real-time filtering pipeline based on Nifty return, Sector return, Price structure, Volume, and Weekly Move checks.")
-            
+            st.subheader("🔍 Full Scan Pipeline Report")
             if df_pipeline is not None and not df_pipeline.empty:
-                if st.session_state.manual_stocks.strip():
-                    st.info(f"📋 **Manual Ticker Mode active.** Scanned **{len(df_pipeline)} stocks** from your manual input. Below is the multi-level filtration report:")
-                else:
-                    st.info(f"📋 **Chartink Scanned Source:** {st.session_state.chartink_url}\n\nFound **{len(df_pipeline)} raw candidates** from the scan. Below is the multi-level filtration report:")
-                st.dataframe(
-                    df_pipeline,
-                    column_config={
-                        "Stock": st.column_config.TextColumn("Stock name"),
-                        "Sector": st.column_config.TextColumn("Sector"),
-                        "Current Price (₹)": st.column_config.TextColumn("Current price"),
-                        "Return vs Nifty": st.column_config.TextColumn("Return vs Nifty"),
-                        "Return vs Sector": st.column_config.TextColumn("Return vs Sector"),
-                        "Status": st.column_config.TextColumn("Status"),
-                        "Reason": st.column_config.TextColumn("Pass/Fail reason")
-                    },
-                    use_container_width=True,
-                    hide_index=True
-                )
+                passed = df_pipeline[df_pipeline["Status"] == "✅ Passed"]
+                filtered = df_pipeline[df_pipeline["Status"] == "❌ Filtered"]
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Total Scanned", len(df_pipeline))
+                c2.metric("✅ Passed", len(passed))
+                c3.metric("❌ Filtered", len(filtered))
+                st.dataframe(df_pipeline, use_container_width=True, hide_index=True)
             else:
-                if not st.session_state.manual_stocks.strip():
-                    st.warning("⚠️ **No Stock Candidates Found:** Either the Chartink URL did not return any stocks (due to Cloudflare blocking the automated connection), or the scanner returned 0 candidates.\n\n"
-                               "👉 **Solution:** Please copy your scanner's stock tickers and paste them into the **Or Manually Enter Stocks** field in the sidebar to scan them instantly.")
-                else:
-                    st.warning("⚠️ No stocks were parsed from your manual tickers input. Please verify that the symbols are valid (e.g. RELIANCE, TCS).")
+                st.info("No stocks scanned yet. Enter stocks in sidebar or provide Chartink URL.")
 
-with tab_back:
-    st.markdown("<div class='dashboard-header'>⏳ Historical Backtester (Jan '26 - Apr '26)</div>", unsafe_allow_html=True)
-    st.markdown("<p style='color: #888;'>FII Institutional Rules: Fast Momentum, Nifty Relative Strength, Target 1:2 RR.</p>", unsafe_allow_html=True)
-    
+        # Scraper log
+        if logs.get('scraper'):
+            st.caption(f"📡 Scanner: {logs['scraper']}")
+
+# ============ TAB 2: SECTOR RRG ============
+with tab_rrg:
     if not st.session_state.fyers_app_id or not st.session_state.fyers_token:
-        st.warning("🔑 **Fyers API Configuration Required:** Please enter your Fyers App ID and log in using the sidebar to run historical backtests.")
+        st.warning("🔑 Please configure Fyers API in sidebar first.")
     else:
-        with st.spinner("Crunching historical market data..."):
-            agents = SwingTradingAgents(
-                use_fyers=True,
-                fyers_app_id=st.session_state.fyers_app_id,
-                fyers_token=st.session_state.fyers_token,
-                chartink_url=st.session_state.chartink_url
+        with st.spinner("📈 Loading Sector RRG..."):
+            try:
+                sector_rrg, stocks_df, df_pipeline, logs = fetch_data(
+                    st.session_state.fyers_app_id,
+                    st.session_state.fyers_token,
+                    lookback_days,
+                    st.session_state.chartink_url,
+                    st.session_state.rr_ratio,
+                    st.session_state.manual_stocks
+                )
+            except Exception as e:
+                sector_rrg = {}
+                st.error(f"Error: {e}")
+
+        if sector_rrg:
+            quadrant_colors = {
+                "Leading": "#00C853",
+                "Improving": "#2979FF",
+                "Weakening": "#FF6D00",
+                "Lagging": "#D50000"
+            }
+
+            fig = go.Figure()
+
+            # Background quadrants
+            fig.add_shape(type="rect", x0=100, x1=110, y0=100, y1=110,
+                          fillcolor="rgba(0,200,83,0.08)", line_width=0)
+            fig.add_shape(type="rect", x0=90, x1=100, y0=100, y1=110,
+                          fillcolor="rgba(41,121,255,0.08)", line_width=0)
+            fig.add_shape(type="rect", x0=100, x1=110, y0=90, y1=100,
+                          fillcolor="rgba(255,109,0,0.08)", line_width=0)
+            fig.add_shape(type="rect", x0=90, x1=100, y0=90, y1=100,
+                          fillcolor="rgba(213,0,0,0.08)", line_width=0)
+
+            # Center lines
+            fig.add_hline(y=100, line_dash="dash", line_color="gray", line_width=1)
+            fig.add_vline(x=100, line_dash="dash", line_color="gray", line_width=1)
+
+            # Sector dots + tails
+            for sector, data in sector_rrg.items():
+                quad = data['Quadrant']
+                color = quadrant_colors.get(quad, "gray")
+                ratios = data['Ratios']
+                moms = data['Momentums']
+
+                # Tail line
+                fig.add_trace(go.Scatter(
+                    x=ratios, y=moms,
+                    mode='lines',
+                    line=dict(color=color, width=2, dash='dot'),
+                    showlegend=False,
+                    hoverinfo='skip'
+                ))
+                # Current dot
+                fig.add_trace(go.Scatter(
+                    x=[ratios[-1]], y=[moms[-1]],
+                    mode='markers+text',
+                    marker=dict(size=14, color=color, line=dict(width=2, color='white')),
+                    text=[sector],
+                    textposition="top center",
+                    textfont=dict(size=11, color=color),
+                    name=f"{sector} ({quad})",
+                    hovertemplate=f"<b>{sector}</b><br>Quadrant: {quad}<br>RS-Ratio: {ratios[-1]:.2f}<br>RS-Momentum: {moms[-1]:.2f}<extra></extra>"
+                ))
+
+            # Quadrant labels
+            for label, x, y, color in [
+                ("🟢 LEADING", 107, 109, "#00C853"),
+                ("🔵 IMPROVING", 93, 109, "#2979FF"),
+                ("🟠 WEAKENING", 107, 91, "#FF6D00"),
+                ("🔴 LAGGING", 93, 91, "#D50000")
+            ]:
+                fig.add_annotation(x=x, y=y, text=f"<b>{label}</b>",
+                                   showarrow=False, font=dict(size=12, color=color))
+
+            fig.update_layout(
+                title="Sector Relative Rotation Graph (RRG) vs Nifty 50",
+                xaxis_title="JdK RS-Ratio →",
+                yaxis_title="JdK RS-Momentum →",
+                xaxis=dict(range=[90, 110], showgrid=True, gridcolor="#EEEEEE"),
+                yaxis=dict(range=[90, 110], showgrid=True, gridcolor="#EEEEEE"),
+                plot_bgcolor='white',
+                paper_bgcolor='white',
+                height=600,
+                legend=dict(orientation="v", x=1.01, y=1),
+                margin=dict(l=60, r=200, t=60, b=60)
             )
-            bt_df, metrics = agents.run_backtest(
-                start_date="2026-01-01", 
-                end_date="2026-04-30", 
-                lookback_days=lookback_days,
-                rr_ratio=float(st.session_state.rr_ratio.split(":")[1])
-            )
-            
-        with st.container(border=True):
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Total Trades", metrics["Total Trades"])
-            c2.metric("Win Rate", metrics["Win Rate"])
-            c3.metric("Wins / Losses", f"{metrics['Wins']} / {metrics['Losses']}")
-            c4.metric("Net Profit", metrics["Net Profit"])
-            
-        with st.container(border=True):
-            c5, c6, c7, c8 = st.columns(4)
-            c5.metric("Avg Return per Trade", metrics["Average Return"])
-            c6.metric("Avg Holding Days", metrics["Average Holding Days"])
-            c7.metric("Best Trade Return", metrics["Best Trade"])
-            c8.metric("Worst Trade Return", metrics["Worst Trade"])
-            
-        # --- CAPITAL GROWTH CURVE CHART ---
-        if not bt_df.empty:
-            st.subheader("Capital Growth Curve")
-            cap_curve_data = [{"Date": "2026-01-01", "Capital (₹)": 50000.0}]
-            running_cap = 50000.0
-            for idx, row in bt_df.iterrows():
-                running_cap += float(row["P&L"])
-                cap_curve_data.append({
-                    "Date": row["Exit Date"],
-                    "Capital (₹)": running_cap
-                })
-            df_cap_curve = pd.DataFrame(cap_curve_data)
-            
-            import plotly.express as px
-            fig_cap = px.line(
-                df_cap_curve,
-                x="Date",
-                y="Capital (₹)",
-                title="Capital Growth Curve (Starting: ₹50,000)",
-                markers=True
-            )
-            fig_cap.update_layout(
-                plot_bgcolor='#FFFFFF',
-                paper_bgcolor='#FFFFFF',
-                font=dict(color='#5F6368'),
-                height=350,
-                margin=dict(l=20, r=20, t=40, b=20),
-                xaxis=dict(showgrid=True, gridcolor='#F1F3F4'),
-                yaxis=dict(showgrid=True, gridcolor='#F1F3F4')
-            )
-            st.plotly_chart(fig_cap, use_container_width=True)
-            
-        st.subheader("Trade Log")
-        if not bt_df.empty:
-            display_bt_df = bt_df[["Entry Date", "Exit Date", "Stock", "Entry", "Stop Loss", "Target", "Status", "P&L", "Holding Days", "Return %"]].copy()
-            st.dataframe(display_bt_df, use_container_width=True, hide_index=True)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Sector table
+            with st.container(border=True):
+                st.subheader("📋 Sector Summary")
+                sector_table = []
+                for sec, data in sector_rrg.items():
+                    sector_table.append({
+                        "Sector": sec,
+                        "Quadrant": data['Quadrant'],
+                        "RS-Ratio": data.get('RS_Ratio', '-'),
+                        "RS-Momentum": data.get('RS_Momentum', '-')
+                    })
+                df_sec = pd.DataFrame(sector_table).sort_values("RS-Ratio", ascending=False)
+                st.dataframe(df_sec, use_container_width=True, hide_index=True)
         else:
-            st.info("No trades executed during backtest range.")
+            st.warning("⚠️ No RRG data loaded. Check Fyers token and try again.")
+
+# ============ TAB 3: BACKTEST ============
+with tab_back:
+    st.subheader("⏳ Historical Backtest")
+    if not st.session_state.fyers_app_id or not st.session_state.fyers_token:
+        st.warning("🔑 Fyers API required. Configure in sidebar.")
+    else:
+        col1, col2 = st.columns(2)
+        with col1:
+            bt_start = st.date_input("Start Date", value=datetime(2026, 1, 1))
+        with col2:
+            bt_end = st.date_input("End Date", value=datetime(2026, 4, 30))
+
+        if st.button("▶️ Run Backtest", use_container_width=True, type="primary"):
+            with st.spinner("Crunching historical data..."):
+                agents = SwingTradingAgents(
+                    use_fyers=True,
+                    fyers_app_id=st.session_state.fyers_app_id,
+                    fyers_token=st.session_state.fyers_token,
+                    chartink_url=st.session_state.chartink_url
+                )
+                bt_df, metrics = agents.run_backtest(
+                    start_date=bt_start.strftime("%Y-%m-%d"),
+                    end_date=bt_end.strftime("%Y-%m-%d"),
+                    lookback_days=lookback_days,
+                    rr_ratio=float(st.session_state.rr_ratio.split(":")[1])
+                )
+
+            with st.container(border=True):
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Total Trades", metrics["Total Trades"])
+                c2.metric("Win Rate", metrics["Win Rate"])
+                c3.metric("Wins / Losses", f"{metrics['Wins']} / {metrics['Losses']}")
+                c4.metric("Net Profit", metrics["Net Profit"])
+                c5, c6, c7, c8 = st.columns(4)
+                c5.metric("Avg Return", metrics["Average Return"])
+                c6.metric("Avg Holding", metrics["Average Holding Days"])
+                c7.metric("Best Trade", metrics["Best Trade"])
+                c8.metric("Worst Trade", metrics["Worst Trade"])
+
+            if not bt_df.empty:
+                # Capital growth curve
+                cap_data = [{"Date": bt_start.strftime("%Y-%m-%d"), "Capital (₹)": 50000.0}]
+                running_cap = 50000.0
+                for _, row in bt_df.iterrows():
+                    running_cap += float(row["P&L"])
+                    cap_data.append({"Date": row["Exit Date"], "Capital (₹)": running_cap})
+                df_cap = pd.DataFrame(cap_data)
+                fig_cap = px.line(df_cap, x="Date", y="Capital (₹)",
+                                  title="Capital Growth Curve (Starting ₹50,000)",
+                                  markers=True, color_discrete_sequence=["#1A73E8"])
+                fig_cap.update_layout(plot_bgcolor='white', paper_bgcolor='white', height=350)
+                st.plotly_chart(fig_cap, use_container_width=True)
+
+                # Trade log
+                st.subheader("📋 Trade Log")
+                st.dataframe(bt_df[["Entry Date","Exit Date","Stock","Entry","Stop Loss","Target","Status","P&L","Return %","Holding Days"]],
+                             use_container_width=True, hide_index=True)
+            else:
+                st.info("No trades executed in this date range.")
